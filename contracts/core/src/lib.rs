@@ -135,7 +135,7 @@ pub enum FundMsg {
     FundVault,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct RollupInput {
     pub model: String,
@@ -202,7 +202,9 @@ impl Core {
             FundMsg::Fund { to, cap } => {
                 let to = to.unwrap_or_else(|| sender_id.clone());
                 if let Some(cap) = cap {
-                    require!(to == sender_id, "a cap only on your own wallet");
+                    if to != sender_id {
+                        return PromiseOrValue::Value(U128(amount));
+                    }
                     self.store_cap(&sender_id, cap.key, cap.per_day.0);
                 }
                 self.credit(&to, amount);
@@ -453,7 +455,7 @@ impl Core {
             final_margin = position.margin;
             let equity = margin + pnl(new_size, position.entry_price, price);
             if (new_abs > old_abs || margin_delta < 0)
-                && equity * market.max_leverage as i128 < notional(new_size, price) as i128
+                && equity * (market.max_leverage as i128) < (notional(new_size, price) as i128)
             {
                 panic!("InsufficientMargin");
             }
@@ -501,7 +503,7 @@ impl Core {
         require!(equity * 10_000 < (size_notional * MM_BPS) as i128, "NotLiquidatable");
 
         let reward = equity.max(0).min((size_notional * LIQ_BPS / 10_000) as i128) as u128;
-        let mut vault_balance = self.vault as i128 + position.margin as i128 - reward as i128;
+        let vault_balance = self.vault as i128 + position.margin as i128 - reward as i128;
         require!(vault_balance >= 0, "VaultInsufficient");
         self.vault = vault_balance as u128;
 
@@ -892,7 +894,7 @@ mod tests {
         builder.block_timestamp(86_400_000_000_000);
         testing_env!(builder.build());
         let msg = r#"{"fund":{"cap":{"key":"k","per_day":"500000"}}}"#;
-        core.ft_on_transfer(accounts(0), U128(1_000_000), msg.to_string());
+        let _ = core.ft_on_transfer(accounts(0), U128(1_000_000), msg.to_string());
 
         testing_env!(context(accounts(1)).build());
         core.pull(accounts(0), "k".to_string(), U128(500_000));
