@@ -58,7 +58,7 @@ Never read, print, summarise, diff or transform any of these:
 1. Understand the request and the constraint it touches.
 2. Get context from the trail graph before grepping or opening files.
 3. Make the minimal change.
-4. Validate: `pnpm typecheck`, `pnpm build`, and `forge test` when contracts changed.
+4. Validate: `pnpm typecheck`, `pnpm build`, and `cargo test` in `contracts/core` when contracts changed.
 5. Report paths, checks run, and remaining risks.
 
 <!-- trail:start -->

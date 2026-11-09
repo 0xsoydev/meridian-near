@@ -19,13 +19,13 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm --filter web test
       - run: pnpm build
-        env:
-          NEXT_PUBLIC_PRIVY_APP_ID: ciplaceholder000000000000
 
   contracts:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/core
     steps:
       - uses: actions/checkout@v4
-      - uses: foundry-rs/foundry-toolchain@v1
-      - if: hashFiles('contracts/src/**/*.sol') != ''
-        run: forge test --root contracts
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo test
