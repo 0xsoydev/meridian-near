@@ -1,9 +1,9 @@
 {
-  "name": "mumbai-2026",
+  "name": "meridian",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.22.2"
   },
   "scripts": {
     "dev": "pnpm --filter web dev",

@@ -1,1 +1,0 @@
-ALTER TABLE "listings" ADD COLUMN "reset_on" date DEFAULT (now() at time zone 'utc')::date NOT NULL;
