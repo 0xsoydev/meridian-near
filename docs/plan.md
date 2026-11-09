@@ -123,7 +123,7 @@ apps/web/
   lib/rollup.ts                minute rollups (moved from hcs.ts) and index math
   lib/perp.ts, lib/payouts.ts  rewired to core
   kept, edited where §8–§10 say: price, rails, book, bids, offers, ledger, listings, accounts, auth, secrets, schema, db, errors, types, utils, testkit
-  scripts/{seed,e2e,perps-e2e,stub-rail}.ts
+  scripts/{seed,e2e,stub-rail}.ts
 contracts/core/                Cargo.toml, rust-toolchain.toml, src/lib.rs (unit tests inside)
 keeper/{main,jobs}.ts
 agents/demo/main.ts
@@ -152,7 +152,7 @@ Removed: @privy-io/*, wagmi, viem, @x402/*, @hiero-ledger/sdk, @worldcoin/*, Fou
 Baseline §6, plus:
 - External data enters as `unknown` and leaves through zod: request bodies, upstream responses, NEAR RPC results, 1Click and wallet outputs.
 - Money and token counts are `bigint` in TypeScript, `u128`/`i128` in the contract, decimal strings in JSON. USDC has 6 decimals on NEAR, so 1 atomic unit = 1 micro-USD.
-- Every on-chain money move the server starts is recorded before it is sent, so a crash can always be reconciled (§9.4).
+- A pull is credited to the float right after the call returns. A crash between the call and the credit costs the owner at most one pull; the next request pulls again (§9.4).
 - Contract: debit before any outgoing transfer; every cross-contract call has a callback that restores state on failure; methods that move an owner's money require 1 yoctoNEAR.
 - Router errors keep the OpenAI shape, and a blocked request adds `action` (§8.2).
 - One runnable check per non-trivial logic: `node:test` in `apps/web/lib/*.test.ts`, `cargo test` in `contracts/core`.
@@ -175,7 +175,10 @@ Baseline §6, plus:
 | POST | `/api/v1/quotes` | none | 1Click quote to fund or withdraw; `dry` unless `execute:true` (§9.11) |
 | GET | `/api/v1/quotes/{deposit_address}` | none | 1Click status |
 | GET | `/api/v1/perps/account?account=` | none | wallet, positions, equity, liquidation prices from `core` |
-| GET | `/api/v1/perps/history?account=` | none | from `core.fills` |
+| GET | `/api/v1/perps/market?model=` | none | the market view and its recent index posts |
+| GET | `/api/v1/wallet?account=` | none | the Meridian wallet balance |
+| POST | `/api/v1/keys/revoke` | NEP-413 `revoke_key` | revoke an owner's key |
+| GET | `/api/v1/approvals/[userCode]` | the user code | the key id and requested limit for `/a/[code]` |
 | kept | `trades`, `sells`, `bids`, `offers`, `holdings`, `fills`, `usage`, `book`, `models`, `status`, `payouts`, `/api/listings/*` | as before | a short float refills by `pull`; listings are NEP-413 signed; `status` also reports the treasury's liabilities |
 | removed | `topup`, `balance`, `keys/deposit`, World `approvals`, `agents/comfy`, `/api/sellers/*` | | |
 
@@ -244,8 +247,7 @@ export function reconcile(): Promise<number>;
 
 - Each instance runs at most one top-up per key at a time (a `Map<keyId, Promise>`).
 - Read `cap(owner, cap_key)` and `wallet(owner)`. `amount = min(max(PULL_MICRO, need − float), left, wallet)`, with `DEMO_PULL_MICRO` for demo keys. When `amount < need − float`: 403 if the limit is the shortfall, 402 if the wallet is.
-- Sign `core.pull(owner, cap_key, amount)` with the web key, insert `topups(tx_hash, key, amount, 'pending')`, then send. On success one statement marks the row `done` and adds `amount` to the float. A contract refusal marks it `failed` and returns the matching 402 or 403.
-- `reconcile` (keeper, every 60 s) reads the RPC `tx` status of pending rows older than 2 minutes: success credits the float, failure marks `failed`, and a hash still unknown after 15 hours is `failed`.
+- Sign `core.pull(owner, cap_key, amount)` with the web key, send it, then add `amount` to the float in one statement. A contract refusal returns the matching 402 or 403.
 - Revoke: one statement zeroes the float (nothing reserved, no open bid or offer), invalidates the hash and inserts a `refund` payout for the owner, which the keeper pays (§9.10). Prepaid MTokens on the key are forfeited, and the page warns first.
 - Demo keys share `cap_key = "demo"` on `NEAR_OWNER_ID`'s wallet, with a $2/day limit.
 
@@ -273,7 +275,7 @@ Baseline §10.10, unchanged: buys walk the asks, limit buys rest as bids, the ma
 
 - Orders are `core.modify(model, size_delta, margin_delta)` with 1 yocto and 50 Tgas. Margin comes from the Meridian wallet, and the ticket shows the wallet balance, the fee and the resulting liquidation price.
 - `orderPlan`, `positionAfter` and `liquidationPrice` in `lib/perp.ts` are unchanged. A flip is a close, then an open, in one `signAndSendTransactions`.
-- Positions, the margin editor, Trade History (from `core.fills`) and the stale-index message work as in baseline §10.8.
+- Positions, the margin editor and the stale-index message work as in baseline §10.8. Trade history is not built yet.
 - The keeper pages `liquidatable` every 30 s and calls `liquidate`.
 
 ### 9.9 Fees and the treasury
@@ -327,7 +329,6 @@ One Node process. Each loop catches its own errors and never overlaps itself.
 | 60 s | `publishRollups` → `core.log_rollups` |
 | 180 s, or woken | `postIndexes` → `core.post` |
 | 30 s | `liquidateUnderwater`: `core.liquidatable`, then `core.liquidate` |
-| 60 s | `reconcile` pending pulls (§9.4) |
 | 60 s | `releaseStale`, `matchAllBids` (unchanged) |
 | 60 s | `dailyClose`: `closeDay`, then `payPending` |
 
@@ -410,7 +411,7 @@ Removed: every `HEDERA_*`, `HCS_TOPIC_ID`, `X402_FACILITATOR_URLS`, `MIRROR_NODE
 | N0 | Repo | `pre-hackathon` tag, deletions, fresh database, `pnpm typecheck` green |
 | N1 | `core` | `cargo test` green; deployed on testnet; a script runs fund, `set_cap`, `pull`, `payout`, `modify`, `liquidate`, `withdraw` |
 | N2 | Router | NEP-413 auth; the device flow mints a key after an on-chain `set_cap`; a request on an empty float pulls once and streams; `/me` |
-| N3 | Keeper | rollups logged, index posted, one liquidation, one payout into a seller wallet, one pending pull reconciled |
+| N3 | Keeper | rollups logged, index posted, one liquidation, one payout into a seller wallet |
 | N4 | Pages | wallet connect; `/a/[code]`; `/keys` fund, withdraw, raise, revoke; `/perps` trade; `/sell` list; `/trade` buy; `/receipts` recompute matches |
 | N5 | Any chain | `dry` quotes on every page; one 0.2 USDC fund from Base into `core` on mainnet |
 | N6 | NEAR AI | the house listing streams and its proof verifies on `/receipts` |
@@ -442,12 +443,15 @@ The demo path freezes Sat 14 at 12:00 UTC.
 **Contract**
 - The contract pays storage for wallets, limits, positions and the bounded histories, so a spammer spends gas and Meridian pays storage.
 - A plain `ft_transfer` to `core` is not credited. The UI only sends `ft_transfer_call`.
+- Perp trade history is not built. `/perps` shows open positions and the index.
 
 **Payments and gas**
 - 1Click deposits into `core` depend on `customRecipientMsg`, which is experimental.
 - Users need a little NEAR for gas; meta-transactions are not used.
+- A crash between a successful `pull` and the float credit costs the owner at most one pull.
 - Concurrent pulls across instances can overshoot a float by one pull each. The on-chain limit still bounds the day.
 - Revoking a key forfeits its prepaid MTokens. Its float is refunded by the next keeper payout.
+- A payout is marked `executed` after the call returns; the payout id travels in the on-chain `payout` event, and the database keeps no transaction hash.
 - Demo keys share one $2/day limit.
 
 **NEAR AI**
