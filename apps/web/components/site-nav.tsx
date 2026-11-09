@@ -8,7 +8,7 @@ const NAV_LINKS = [
   { label: "Trade", href: "/trade" },
   { label: "Perps", href: "/perps" },
   { label: "Sell", href: "/sell" },
-  { label: "Keys", href: "/keys" },
+  { label: "Wallet", href: "/keys" },
   { label: "Receipts", href: "/receipts" },
 ];
 
