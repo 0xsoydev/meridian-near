@@ -6,9 +6,7 @@ import {
   date,
   index,
   integer,
-  numeric,
   pgTable,
-  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -21,18 +19,9 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
-export const sellers = pgTable("sellers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  address: text("address").notNull().unique(),
-  worldNullifier: numeric("world_nullifier", { precision: 78, scale: 0 }).notNull().unique(),
-  hederaAccount: text("hedera_account"),
-  createdAt: createdAt(),
-});
-
 export const accounts = pgTable("accounts", {
   id: uuid("id").primaryKey().defaultRandom(),
   address: text("address").notNull().unique(),
-  worldNullifier: numeric("world_nullifier", { precision: 78, scale: 0 }).unique(),
   createdAt: createdAt(),
 });
 
@@ -41,15 +30,12 @@ export const keys = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     accountId: uuid("account_id").references(() => accounts.id),
+    name: text("name"),
+    capKey: text("cap_key"),
     hash: bytea("hash").notNull().unique(),
-    balanceUsdMicro: bigint("balance_usd_micro", { mode: "bigint" }).notNull(),
+    balanceUsdMicro: bigint("balance_usd_micro", { mode: "bigint" }).notNull().default(sql`0`),
     reservedUsdMicro: bigint("reserved_usd_micro", { mode: "bigint" }).notNull().default(sql`0`),
-    autoTopupUsdMicro: bigint("auto_topup_usd_micro", { mode: "bigint" }).notNull().default(sql`0`),
-    dailyTopupCapUsdMicro: bigint("daily_topup_cap_usd_micro", { mode: "bigint" })
-      .notNull()
-      .default(sql`5000000`),
     defaultModel: text("default_model"),
-    worldSub: text("world_sub"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -64,36 +50,42 @@ export const listings = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     sellerId: uuid("seller_id")
       .notNull()
-      .references(() => sellers.id),
+      .references(() => accounts.id),
     rail: text("rail").notNull(),
     model: text("model").notNull(),
-    authKind: text("auth_kind").notNull(),
     credentialCiphertext: text("credential_ciphertext").notNull(),
-    accountRef: text("account_ref"),
-    priceMicroPerMtok: bigint("price_micro_per_mtok", { mode: "bigint" }),
+    priceMicroPerMtok: bigint("price_micro_per_mtok", { mode: "bigint" }).notNull(),
     capacityTokens: bigint("capacity_tokens", { mode: "bigint" }).notNull(),
     usedTokens: bigint("used_tokens", { mode: "bigint" }).notNull().default(sql`0`),
     reservedTokens: bigint("reserved_tokens", { mode: "bigint" }).notNull().default(sql`0`),
     throttledUntil: timestamp("throttled_until", { withTimezone: true }),
     status: text("status").notNull(),
-    resetOn: date("reset_on", { mode: "string" })
-      .notNull()
-      .default(sql`(now() at time zone 'utc')::date`),
     clientNonce: text("client_nonce").notNull().unique(),
     createdAt: createdAt(),
   },
   (t) => [
     check("listings_capacity_positive", sql`${t.capacityTokens} > 0`),
-    check(
-      "listings_capacity_bound",
-      sql`${t.usedTokens} + ${t.reservedTokens} <= ${t.capacityTokens}`,
-    ),
-    check("listings_auth_kind", sql`${t.authKind} in ('key','oauth')`),
-    check(
-      "listings_status",
-      sql`${t.status} in ('active','exhausted','invalid','cancelled','pending_auth')`,
-    ),
+    check("listings_capacity_bound", sql`${t.usedTokens} + ${t.reservedTokens} <= ${t.capacityTokens}`),
+    check("listings_price_positive", sql`${t.priceMicroPerMtok} > 0`),
+    check("listings_status", sql`${t.status} in ('active','exhausted','throttled','invalid','cancelled')`),
     index("listings_model_status_price_idx").on(t.model, t.status, t.priceMicroPerMtok),
+  ],
+);
+
+export const topups = pgTable(
+  "topups",
+  {
+    txHash: text("tx_hash").primaryKey(),
+    keyId: uuid("key_id")
+      .notNull()
+      .references(() => keys.id),
+    amountUsdMicro: bigint("amount_usd_micro", { mode: "bigint" }).notNull(),
+    status: text("status").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("topups_status", sql`${t.status} in ('pending','done','failed')`),
+    index("topups_key_created_idx").on(t.keyId, t.createdAt),
   ],
 );
 
@@ -101,37 +93,23 @@ export const payouts = pgTable(
   "payouts",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    sellerId: uuid("seller_id")
+    accountId: uuid("account_id")
       .notNull()
-      .references(() => sellers.id),
+      .references(() => accounts.id),
     day: date("day", { mode: "string" }).notNull(),
     amountUsdMicro: bigint("amount_usd_micro", { mode: "bigint" }).notNull(),
-    scheduleId: text("schedule_id"),
-    executeAt: timestamp("execute_at", { withTimezone: true }),
+    kind: text("kind").notNull().default("earnings"),
+    txHash: text("tx_hash"),
     status: text("status").notNull(),
     createdAt: createdAt(),
   },
   (t) => [
-    uniqueIndex("payouts_seller_day_key").on(t.sellerId, t.day),
-    check(
-      "payouts_status",
-      sql`${t.status} in ('pending','scheduled','executed','cancelled')`,
-    ),
+    uniqueIndex("payouts_account_day_earnings_key")
+      .on(t.accountId, t.day)
+      .where(sql`${t.kind} = 'earnings'`),
+    check("payouts_kind", sql`${t.kind} in ('earnings','refund')`),
+    check("payouts_status", sql`${t.status} in ('pending','executed')`),
   ],
-);
-
-export const topups = pgTable(
-  "topups",
-  {
-    txId: text("tx_id").primaryKey(),
-    keyId: uuid("key_id")
-      .notNull()
-      .references(() => keys.id),
-    amountUsdMicro: bigint("amount_usd_micro", { mode: "bigint" }).notNull(),
-    payer: text("payer").notNull(),
-    createdAt: createdAt(),
-  },
-  (t) => [index("topups_key_created_idx").on(t.keyId, t.createdAt)],
 );
 
 export const usage = pgTable(
@@ -156,11 +134,10 @@ export const usage = pgTable(
     listCostUsdMicro: bigint("list_cost_usd_micro", { mode: "bigint" }).notNull().default(sql`0`),
     mixedTokens: bigint("mixed_tokens", { mode: "bigint" }).notNull().default(sql`0`),
     chargeUsdMicro: bigint("charge_usd_micro", { mode: "bigint" }).notNull().default(sql`0`),
-    sellerEarningUsdMicro: bigint("seller_earning_usd_micro", { mode: "bigint" })
-      .notNull()
-      .default(sql`0`),
+    sellerEarningUsdMicro: bigint("seller_earning_usd_micro", { mode: "bigint" }).notNull().default(sql`0`),
     payoutId: uuid("payout_id").references(() => payouts.id),
-    hcsMinute: bigint("hcs_minute", { mode: "bigint" }),
+    rollupMinute: bigint("rollup_minute", { mode: "bigint" }),
+    proof: text("proof"),
     createdAt: createdAt(),
     settledAt: timestamp("settled_at", { withTimezone: true }),
   },
@@ -172,6 +149,7 @@ export const usage = pgTable(
     index("usage_status_created_idx").on(t.status, t.createdAt),
     index("usage_settled_at_idx").on(t.settledAt),
     index("usage_listing_payout_idx").on(t.listingId, t.payoutId),
+    index("usage_rollup_idx").on(t.rollupMinute),
   ],
 );
 
@@ -281,58 +259,25 @@ export const approvals = pgTable(
   "approvals",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(),
     keyId: uuid("key_id")
       .notNull()
       .references(() => keys.id),
-    kind: text("kind").notNull(),
     capUsdMicro: bigint("cap_usd_micro", { mode: "bigint" }),
-    deviceCodeCiphertext: text("device_code_ciphertext").notNull(),
-    userCode: text("user_code").notNull(),
-    verificationUriComplete: text("verification_uri_complete").notNull(),
-    intervalS: integer("interval_s").notNull(),
+    deviceCodeHash: bytea("device_code_hash").unique(),
+    keyCiphertext: text("key_ciphertext"),
+    userCode: text("user_code").notNull().unique(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     status: text("status").notNull(),
     createdAt: createdAt(),
   },
   (t) => [
-    check("approvals_kind", sql`${t.kind} in ('link_human','raise_cap')`),
+    check("approvals_kind", sql`${t.kind} in ('create_key','raise_cap')`),
     check("approvals_status", sql`${t.status} in ('pending','approved','denied','expired')`),
   ],
 );
 
-export const perpEvents = pgTable(
-  "perp_events",
-  {
-    txHash: text("tx_hash").notNull(),
-    logIndex: integer("log_index").notNull(),
-    account: text("account").notNull(),
-    model: text("model").notNull(),
-    kind: text("kind").notNull(),
-    size: bigint("size", { mode: "bigint" }).notNull(),
-    margin: bigint("margin", { mode: "bigint" }).notNull(),
-    price: bigint("price", { mode: "bigint" }).notNull(),
-    realizedPnl: bigint("realized_pnl", { mode: "bigint" }).notNull(),
-    fee: bigint("fee", { mode: "bigint" }).notNull(),
-    reward: bigint("reward", { mode: "bigint" }).notNull(),
-    block: bigint("block", { mode: "bigint" }).notNull(),
-    at: timestamp("at", { withTimezone: true }).notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.txHash, t.logIndex] }),
-    check("perp_events_kind", sql`${t.kind} in ('modify','liquidate')`),
-    index("perp_events_account_block_idx").on(t.account, t.block),
-  ],
-);
-
-export const comfyAgents = pgTable("comfy_agents", {
-  keyId: uuid("key_id")
-    .primaryKey()
-    .references(() => keys.id, { onDelete: "cascade" }),
-  agent: text("agent").notNull(),
-  createdAt: createdAt(),
-});
-
-export type SellerRow = typeof sellers.$inferSelect;
+export type AccountRow = typeof accounts.$inferSelect;
 export type ListingRow = typeof listings.$inferSelect;
 export type KeyRow = typeof keys.$inferSelect;
 export type UsageRow = typeof usage.$inferSelect;
@@ -340,3 +285,4 @@ export type TradeRow = typeof trades.$inferSelect;
 export type PrepaidRow = typeof prepaid.$inferSelect;
 export type PayoutRow = typeof payouts.$inferSelect;
 export type ApprovalRow = typeof approvals.$inferSelect;
+export type TopupRow = typeof topups.$inferSelect;

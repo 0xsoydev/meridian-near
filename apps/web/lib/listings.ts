@@ -10,14 +10,7 @@ export function parseCapacityMtok(value: string): bigint | null {
   return tokens > 0n && tokens <= MAX_INT8 ? tokens : null;
 }
 
-export function listingPriceError(
-  price: bigint | null,
-  own: Pricing,
-  resetPeriod: "daily" | "monthly" | null,
-): string | null {
-  if (price === null) {
-    return resetPeriod === null ? "a blank price requires expiring credits" : null;
-  }
+export function listingPriceError(price: bigint, own: Pricing): string | null {
   if (price <= 0n) return "price must be positive";
   return price <= blended(own) ? null : "price must be at or below this rail's list price";
 }

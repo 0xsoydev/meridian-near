@@ -25,7 +25,6 @@ export function parseUsdPerToken(decimal: string): MicroPerMTok {
 }
 
 export const TOPUP_MIN_MICRO = 100_000n;
-export const TOPUP_MAX_MICRO = 20_000_000n;
 
 export function parseUsd(decimal: string): Micro | null {
   const match = /^(\d{1,6})(?:\.(\d{1,6}))?$/.exec(decimal.trim());
@@ -155,16 +154,6 @@ export function previewFill(
 
 export function railCost(p: Pricing, promptTokens: bigint, completionTokens: bigint): Micro {
   return ceilDiv(promptTokens * p.prompt + completionTokens * p.completion, MICRO_PER_MTOK);
-}
-
-export function marketPrice(
-  bestLimitAsk: MicroPerMTok | null,
-  ref: Pricing,
-  rail: Rail,
-): MicroPerMTok | null {
-  if (bestLimitAsk !== null) return bestLimitAsk;
-  if (rail.resetPeriod === null) return null;
-  return (blended(ref) * 9n) / 10n;
 }
 
 export function estimatePromptTokens(utf8Bytes: number): bigint {

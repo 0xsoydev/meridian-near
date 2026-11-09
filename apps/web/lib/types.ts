@@ -1,5 +1,4 @@
 export type RailId =
-  | "0g"
   | "stub"
   | "anthropic"
   | "openai"
@@ -7,12 +6,9 @@ export type RailId =
   | "commandcode"
   | "zen"
   | "opencode-go"
-  | "claude-code"
-  | "codex";
+  | "near-ai";
 
-export type RailProtocol = "openai-chat" | "anthropic-messages" | "openai-responses";
-
-export type Verifiability = "TeeML" | "TeeTLS" | null;
+export type Verifiability = "tee" | null;
 
 export type RailModel = {
   canonical: string;
@@ -22,18 +18,15 @@ export type RailModel = {
   verifiability: Verifiability;
 };
 
-export type RailCheck = "probe" | "key" | "models" | "chat";
+export type RailCheck = "key" | "models" | "chat" | "check";
 
 export type Rail = {
   id: RailId;
-  protocol: RailProtocol;
   baseUrl: string;
   modelsUrl: string;
   check: RailCheck;
-  auth: "key" | "oauth";
   extraHeaders: Record<string, string>;
   models: ReadonlyArray<RailModel>;
-  resetPeriod: "daily" | "monthly" | null;
   maxTokensField?: "max_tokens" | "max_completion_tokens";
   enabled: boolean;
 };
@@ -51,11 +44,12 @@ export type RouterErrorCode =
   | "upstream_failed"
   | "invalid_request";
 
-export type ApprovalStart = {
-  approval_id: string;
-  user_code: string;
-  verification_uri_complete: string;
-  expires_at: string;
+export type BlockedAction = {
+  url: string;
+  code: string;
+  qr: string;
+  near_cli: string;
+  poll: string;
 };
 
 export type RouterError = {
@@ -69,7 +63,22 @@ export type RouterError = {
       | "server_error";
     code: RouterErrorCode;
   };
-  approval?: ApprovalStart;
+  action?: BlockedAction;
+};
+
+export type DeviceStart = {
+  device_code: string;
+  user_code: string;
+  verification_uri_complete: string;
+  qr: string;
+  expires_at: string;
+  interval: number;
+};
+
+export type DeviceStatus = {
+  status: "pending" | "approved" | "denied" | "expired";
+  key?: string;
+  key_id?: string;
 };
 
 export type ModelRow = {
@@ -86,56 +95,47 @@ export type ModelRow = {
   available_tokens: string;
 };
 
-export type TopupResult = {
-  key?: string;
-  key_id: string;
-  balance_usd_micro: string;
-  tx_id: string;
-};
-
 export type CreateKeyResult = { key: string; key_id: string };
 
-export type KeySummary = { key_id: string; balance_usd_micro: string; created_at: string };
-
-export type DepositResult = {
-  tx_id: string;
-  amount_usd_micro: string;
-  balance_usd_micro: string;
+export type KeySummary = {
+  key_id: string;
+  name: string;
+  float_usd_micro: string;
+  created_at: string;
 };
 
-export type Balance = {
-  memo: string;
-  treasury: string | null;
-  treasury_evm: string | null;
-  usdc_evm: string | null;
-  wallet: string | null;
-  balance_usd_micro: string;
+export type CapSummary = {
+  per_day_usd_micro: string;
+  used_today_usd_micro: string;
+  left_usd_micro: string;
+};
+
+export type Me = {
+  owner: string;
+  wallet_usd_micro: string;
+  float_usd_micro: string;
   reserved_usd_micro: string;
-  topped_up_today_usd_micro: string;
-  daily_topup_cap_usd_micro: string;
-  auto_topup_usd_micro: string;
+  cap: CapSummary;
   default_model: string | null;
-  human_linked: boolean;
+  prepaid_tokens: string;
+  open_bids: number;
+  open_offers: number;
 };
 
 export type KeySettings = {
-  auto_topup_usd_micro?: string;
-  daily_topup_cap_usd_micro?: string;
   default_model?: string | null;
 };
-
-export type ApprovalStatus = { status: "pending" | "approved" | "denied" | "expired" };
 
 export type ListingIntent = {
   action: "list";
   rail: RailId;
   model: string;
   capacity_mtok: string;
-  price_micro_per_mtok: string | null;
+  price_micro_per_mtok: string;
   client_nonce: string;
 };
 
-export type Credential = { kind: "key"; key: string } | { kind: "oauth" };
+export type Credential = { kind: "key"; key: string } | { kind: "stored"; listing_id: string };
 
 export type TradeIntent = { model: string; tokens: string };
 
@@ -170,6 +170,20 @@ export type PerpFill = {
   reward_usd_micro: string;
 };
 
+export type PerpAccount = {
+  account: string;
+  wallet_usd_micro: string;
+  positions: {
+    model: string;
+    size: string;
+    margin_usd_micro: string;
+    entry_price_micro_per_mtok: string;
+    equity_usd_micro: string;
+    funding_owed_usd_micro: string;
+    liquidation_price_micro_per_mtok: string;
+  }[];
+};
+
 export type Offer = {
   offer_id: string;
   model: string;
@@ -194,7 +208,7 @@ export type Holding = {
 export type VenueStatus = {
   keeper_last_post_s: number | null;
   markets: { model: string; index_micro_per_mtok: string | null; age_s: number | null; open: boolean }[];
-  payouts: { pending: number; scheduled: number; last_executed_day: string | null };
+  payouts: { pending: number; executed: number; last_day: string | null };
   venue: { fills_24h: number; volume_24h_tokens: string; open_asks: number };
 };
 
@@ -207,8 +221,9 @@ export type KeyUsage = {
   completion_tokens: number;
   mixed_tokens: string;
   charge_usd_micro: string;
-  paid_from: "prepaid" | "balance";
+  paid_from: "prepaid" | "float";
   upstream_request_id: string | null;
+  proof: boolean;
 };
 
 export type KeyFill = {
@@ -245,19 +260,24 @@ export type SellerListing = {
   listing_id: string;
   rail: string;
   model: string;
-  price_micro_per_mtok: string | null;
+  price_micro_per_mtok: string;
   capacity_tokens: string;
   used_tokens: string;
   reserved_tokens: string;
   status: string;
 };
 
-export type SellerListings = { verified: boolean; listings: SellerListing[] };
+export type SellerListings = { listings: SellerListing[] };
 
 export type SellerPayouts = {
   network: string;
   unpaid_usd_micro: string;
-  data: { day: string; amount_usd_micro: string; schedule_id: string | null; execute_at: string | null; status: string }[];
+  data: {
+    day: string;
+    amount_usd_micro: string;
+    tx_hash: string | null;
+    status: string;
+  }[];
 };
 
 export type Rollup = {
@@ -271,26 +291,6 @@ export type Rollup = {
   usage_root: string;
 };
 
-export type ReceiptsConfig =
-  | { ok: true; mirrorUrl: string; topicId: string; payer: string; network: "testnet" | "mainnet" }
-  | { ok: false; reason: string };
-
-export type TopupReceipt = {
-  txId: string;
-  amountUsdMicro: string;
-  payer: string;
-  keyId: string;
-  createdAt: string;
-};
-
-export type IndexPostReceipt = {
-  model: string;
-  priceMicroPerMtok: string;
-  hcsSeqFrom: string;
-  hcsSeqTo: string;
-  txHash: string;
-  blockNumber: string;
-  loggedAt: string | null;
-};
+export type IndexPost = { model: string; price_micro_per_mtok: string; at: number };
 
 export type MarketIndex = { model: string; priceMicroPerMtok: string };

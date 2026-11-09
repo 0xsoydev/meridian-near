@@ -1,18 +1,16 @@
 import { z } from "zod";
 import { blended, parseUsdPerToken, referenceFor } from "./price.ts";
-import type { Pricing, Rail, RailCheck, RailId, RailModel, RailProtocol, Verifiability } from "./types";
+import type { Pricing, Rail, RailCheck, RailId, RailModel, Verifiability } from "./types";
 
 type RailConfig = {
   id: RailId;
-  protocol: RailProtocol;
   baseUrl: string;
   modelsUrl: string;
   check: RailCheck;
-  auth: "key" | "oauth";
   extraHeaders: Record<string, string>;
-  resetPeriod: "daily" | "monthly" | null;
   maxTokensField?: "max_tokens" | "max_completion_tokens";
   models: "live" | "ranked" | ReadonlyArray<string>;
+  verifiableIds?: ReadonlyArray<string>;
 };
 
 const priceSchema = z.object({ prompt: z.string(), completion: z.string() });
@@ -33,6 +31,14 @@ const listSchema = z.object({ data: z.array(z.unknown()) });
 const rankingSchema = z.object({
   data: z.array(z.object({ date: z.string(), model_permaslug: z.string(), total_tokens: z.coerce.bigint() })),
 });
+
+const TEE_MODELS = [
+  "z-ai/glm-5.3-flash",
+  "Qwen/Qwen3.8-27B",
+  "Qwen/Qwen3.6-35B-A3B-FP8",
+  "Qwen/Qwen3-VL-30B-A3B-Instruct",
+  "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+];
 
 const ZEN_MODELS = [
   "glm-5.3",
@@ -80,88 +86,68 @@ let cache: { at: number; rails: Rail[] } | null = null;
 let ranking: { at: number; slugs: string[] } | null = null;
 
 function configs(): RailConfig[] {
-  const og = process.env.OG_ROUTER_URL ?? "https://router-api.0g.ai/v1";
+  const nearai = process.env.NEARAI_BASE_URL ?? "https://cloud-api.near.ai/v1";
   const openrouter = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
   const commandcode = process.env.COMMANDCODE_BASE_URL ?? "https://api.commandcode.ai/provider/v1";
   const anthropic = process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1";
   const openai = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
   const list: RailConfig[] = [
     {
-      id: "0g",
-      protocol: "openai-chat",
-      baseUrl: og,
-      modelsUrl: process.env.OG_MODELS_URL ?? "https://router-api.0g.ai/v1/models",
-      check: "probe",
-      auth: "key",
+      id: "near-ai",
+      baseUrl: nearai,
+      modelsUrl: `${nearai}/models`,
+      check: "check",
       extraHeaders: {},
-      resetPeriod: "daily",
       models: "live",
+      verifiableIds: TEE_MODELS,
     },
     {
       id: "openrouter",
-      protocol: "openai-chat",
       baseUrl: openrouter,
       modelsUrl: `${openrouter}/models`,
       check: "key",
-      auth: "key",
       extraHeaders: {},
-      resetPeriod: null,
       models: "ranked",
     },
     {
       id: "commandcode",
-      protocol: "openai-chat",
       baseUrl: commandcode,
       modelsUrl: `${commandcode}/models`,
       check: "chat",
-      auth: "key",
       extraHeaders: {},
-      resetPeriod: null,
       maxTokensField: "max_completion_tokens",
       models: "live",
     },
     {
       id: "zen",
-      protocol: "openai-chat",
       baseUrl: process.env.ZEN_BASE_URL ?? "https://opencode.ai/inference/openai/v1",
       modelsUrl: "https://opencode.ai/zen/v1/models",
       check: "models",
-      auth: "key",
       extraHeaders: {},
-      resetPeriod: null,
       models: ZEN_MODELS,
     },
     {
       id: "opencode-go",
-      protocol: "openai-chat",
       baseUrl: process.env.OPENCODE_GO_BASE_URL ?? "https://opencode.ai/inference/go/openai/v1",
       modelsUrl: "https://opencode.ai/zen/go/v1/models",
       check: "models",
-      auth: "key",
       extraHeaders: { "user-agent": "celestial-trade/1.0" },
-      resetPeriod: null,
       models: GO_MODELS,
     },
     {
       id: "anthropic",
-      protocol: "openai-chat",
       baseUrl: anthropic,
       modelsUrl: `${anthropic}/models`,
       check: "models",
-      auth: "key",
       extraHeaders: { "anthropic-version": "2023-06-01" },
-      resetPeriod: null,
       models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"],
     },
     {
       id: "openai",
-      protocol: "openai-chat",
       baseUrl: openai,
       modelsUrl: `${openai}/models`,
       check: "models",
-      auth: "key",
       extraHeaders: {},
-      resetPeriod: null,
       maxTokensField: "max_completion_tokens",
       models: ["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"],
     },
@@ -170,13 +156,10 @@ function configs(): RailConfig[] {
   if (stub) {
     list.push({
       id: "stub",
-      protocol: "openai-chat",
       baseUrl: stub,
       modelsUrl: `${stub}/models`,
       check: "models",
-      auth: "key",
       extraHeaders: {},
-      resetPeriod: null,
       models: "live",
     });
   }
@@ -201,7 +184,7 @@ function pricingOf(raw: RawModel): Pricing | null {
 }
 
 function verifiabilityOf(raw: RawModel): Verifiability {
-  return raw.verifiability === "TeeML" || raw.verifiability === "TeeTLS" ? raw.verifiability : null;
+  return raw.verifiability === "TeeML" || raw.verifiability === "TeeTLS" ? "tee" : null;
 }
 
 async function fetchModels(url: string): Promise<RawModel[]> {
@@ -256,6 +239,8 @@ async function loadRail(
     if (!pricing || models.some((model) => model.canonical === canonical)) return;
     models.push({ canonical, upstream, listPrompt: pricing.prompt, listCompletion: pricing.completion, verifiability });
   };
+  const tee = (raw: RawModel): Verifiability =>
+    verifiabilityOf(raw) ?? (config.verifiableIds?.includes(raw.id) ? "tee" : null);
 
   if (config.models === "ranked") {
     for (const slug of await rankedSlugs(config.baseUrl)) {
@@ -265,14 +250,23 @@ async function loadRail(
   } else if (config.models === "live") {
     for (const raw of await fetchModels(config.modelsUrl)) {
       if (raw.supported_endpoints && !raw.supported_endpoints.includes("/chat/completions")) continue;
-      add(raw.id, pricingOf(raw) ?? prices.get(canonicalId(raw.id)), verifiabilityOf(raw));
+      add(raw.id, pricingOf(raw) ?? prices.get(canonicalId(raw.id)), tee(raw));
     }
   } else {
     for (const upstream of config.models) add(upstream, prices.get(canonicalId(upstream)), null);
   }
 
   if (models.length === 0) return null;
-  return { ...config, models, enabled: true };
+  return {
+    id: config.id,
+    baseUrl: config.baseUrl,
+    modelsUrl: config.modelsUrl,
+    check: config.check,
+    extraHeaders: config.extraHeaders,
+    models,
+    enabled: true,
+    ...(config.maxTokensField ? { maxTokensField: config.maxTokensField } : {}),
+  };
 }
 
 export async function catalog(): Promise<Rail[]> {
