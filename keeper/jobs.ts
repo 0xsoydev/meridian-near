@@ -72,6 +72,7 @@ export async function postIndexes(): Promise<void> {
         continue;
       }
       const market = await readMarket(model);
+      if (!market.listed) continue;
       const rollups = await readRollups(model, minuteOf(Date.now()) - windowMinutes());
       const source = twap(rollups) ?? (await asks(model))[0]?.price ?? null;
       if (source === null) {

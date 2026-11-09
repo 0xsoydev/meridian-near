@@ -5,6 +5,7 @@ import { db } from "../lib/db.ts";
 import { listings } from "../lib/schema.ts";
 import { seal } from "../lib/secrets.ts";
 import { coreId, usdcId } from "../lib/near.ts";
+import { MARKETS } from "../lib/perp.ts";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -43,12 +44,11 @@ async function main(): Promise<void> {
   const core = coreId();
   const usdc = usdcId();
   console.log(`\nOwner commands (run these once, from the team wallet):\n`);
-  console.log(
-    `near contract call-function as-transaction ${core} list_market json-args '{"model":"${MODEL}","max_leverage":5,"max_oi":"1000000000000","funding_k":"277777777778"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as ${owner} network-config ${process.env.NEAR_NETWORK ?? "testnet"} sign-with-keychain send`,
-  );
-  console.log(
-    `near contract call-function as-transaction ${core} list_market json-args '{"model":"glm-5.3","max_leverage":5,"max_oi":"1000000000000","funding_k":"277777777778"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as ${owner} network-config ${process.env.NEAR_NETWORK ?? "testnet"} sign-with-keychain send`,
-  );
+  for (const market of MARKETS) {
+    console.log(
+      `near contract call-function as-transaction ${core} list_market json-args '{"model":"${market}","max_leverage":5,"max_oi":"1000000000000","funding_k":"277777777778"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as ${owner} network-config ${process.env.NEAR_NETWORK ?? "testnet"} sign-with-keychain send`,
+    );
+  }
   console.log(
     `near contract call-function as-transaction ${usdc} ft_transfer_call json-args '{"receiver_id":"${core}","amount":"25000000","msg":"{\\"fund_vault\\":{}}"}' prepaid-gas '100 Tgas' attached-deposit '1 yoctoNEAR' sign-as ${owner} network-config ${process.env.NEAR_NETWORK ?? "testnet"} sign-with-keychain send`,
   );

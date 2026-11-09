@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatUsd, parseUsd } from "../../../lib/price";
-import type { SellerListings, SellerPayouts } from "../../../lib/types";
+import { formatMicroPerMtok, formatUsd, parseUsd } from "../../../lib/price";
+import type { SellerListing, SellerListings, SellerPayouts } from "../../../lib/types";
 import { useNear } from "../providers";
 
 const RAILS = ["openrouter", "commandcode", "zen", "opencode-go", "anthropic", "openai"];
@@ -14,6 +14,8 @@ export default function SellPage() {
   const [price, setPrice] = useState("0.17");
   const [capacity, setCapacity] = useState("20");
   const [apiKey, setApiKey] = useState("");
+  const [source, setSource] = useState("");
+  const [amendments, setAmendments] = useState<Record<string, { price: string; capacity: string }>>({});
   const [listings, setListings] = useState<SellerListings["listings"]>([]);
   const [payouts, setPayouts] = useState<SellerPayouts | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -39,8 +41,8 @@ export default function SellPage() {
       setMessage("invalid price");
       return;
     }
-    if (!apiKey.startsWith("sk-")) {
-      setMessage("paste the provider API key");
+    if (!source && !apiKey.startsWith("sk-")) {
+      setMessage("paste the provider API key, or reuse one of your listings");
       return;
     }
     setBusy(true);
@@ -58,7 +60,10 @@ export default function SellPage() {
     const response = await fetch("/api/listings", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ signed: envelope, credential: { kind: "key", key: apiKey } }),
+      body: JSON.stringify({
+        signed: envelope,
+        credential: source ? { kind: "stored", listing_id: source } : { kind: "key", key: apiKey },
+      }),
     });
     const body = (await response.json()) as { error?: { message: string } };
     setBusy(false);
@@ -67,6 +72,60 @@ export default function SellPage() {
       setApiKey("");
       await load();
     }
+  };
+
+  const draftFor = (listing: SellerListing) =>
+    amendments[listing.listing_id] ?? {
+      price: formatMicroPerMtok(BigInt(listing.price_micro_per_mtok)),
+      capacity: (BigInt(listing.capacity_tokens) / 1_000_000n).toString(),
+    };
+
+  const amend = async (listing: SellerListing) => {
+    const draft = draftFor(listing);
+    const micro = parseUsd(draft.price);
+    if (micro === null) {
+      setMessage("invalid price");
+      return;
+    }
+    const envelope = await sign("amend", {
+      listing_id: listing.listing_id,
+      price_micro_per_mtok: micro.toString(),
+      capacity_mtok: draft.capacity,
+      client_nonce: crypto.randomUUID(),
+    });
+    if (!envelope) return;
+    const response = await fetch(`/api/listings/${listing.listing_id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signed: envelope }),
+    });
+    if (!response.ok) {
+      const body = (await response.json()) as { error?: { message: string } };
+      setMessage(body.error?.message ?? "could not amend");
+      return;
+    }
+    setMessage("amended");
+    await load();
+  };
+
+  const cancel = async (listing: SellerListing) => {
+    const envelope = await sign("cancel", {
+      listing_id: listing.listing_id,
+      client_nonce: crypto.randomUUID(),
+    });
+    if (!envelope) return;
+    const response = await fetch(`/api/listings/${listing.listing_id}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signed: envelope }),
+    });
+    if (!response.ok) {
+      const body = (await response.json()) as { error?: { message: string } };
+      setMessage(body.error?.message ?? "could not cancel");
+      return;
+    }
+    setMessage("cancelled");
+    await load();
   };
 
   if (!accountId) {
@@ -112,9 +171,24 @@ export default function SellPage() {
           <input value={capacity} onChange={(event) => setCapacity(event.target.value)} className="h-10 rounded-[6px] border border-[#CECECE] px-3 tabular-nums" />
         </label>
         <label className="flex flex-col gap-1 text-sm md:col-span-2">
-          Provider API key
-          <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" className="h-10 rounded-[6px] border border-[#CECECE] px-3 font-mono text-xs" />
+          Credential
+          <select value={source} onChange={(event) => setSource(event.target.value)} className="h-10 rounded-[6px] border border-[#CECECE] px-3">
+            <option value="">paste a new key</option>
+            {listings
+              .filter((listing) => listing.rail === rail)
+              .map((listing) => (
+                <option key={listing.listing_id} value={listing.listing_id}>
+                  reuse the key from {listing.model}
+                </option>
+              ))}
+          </select>
         </label>
+        {source === "" && (
+          <label className="flex flex-col gap-1 text-sm md:col-span-2">
+            Provider API key
+            <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" className="h-10 rounded-[6px] border border-[#CECECE] px-3 font-mono text-xs" />
+          </label>
+        )}
         <button type="button" disabled={busy} onClick={() => void list()} className="h-10 w-fit rounded-[6px] bg-black px-5 font-semibold text-white disabled:bg-[#D4D4D4] md:col-span-2">
           List
         </button>
@@ -125,14 +199,35 @@ export default function SellPage() {
         <h2 className="text-xl font-semibold">Your listings</h2>
         {listings.length === 0 && <p className="text-[#555]">Nothing listed yet.</p>}
         {listings.map((listing) => (
-          <article key={listing.listing_id} className="flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-[#CECECE] p-4 text-sm tabular-nums">
-            <span className="font-semibold">{listing.model}</span>
-            <span>{listing.rail}</span>
-            <span>{formatUsd(BigInt(listing.price_micro_per_mtok))}</span>
-            <span className="text-[#777]">
-              {listing.used_tokens} of {listing.capacity_tokens} used
-            </span>
-            <span className="text-[#777]">{listing.status}</span>
+          <article key={listing.listing_id} className="grid gap-3 rounded-[8px] border border-[#CECECE] p-4 text-sm md:grid-cols-[1fr_auto]">
+            <div className="flex flex-col gap-1 tabular-nums">
+              <p className="font-semibold">{listing.model}</p>
+              <p className="text-[#555]">
+                {listing.rail} · {listing.status} · {listing.used_tokens} of {listing.capacity_tokens} used
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <input
+                value={draftFor(listing).price}
+                onChange={(event) =>
+                  setAmendments({ ...amendments, [listing.listing_id]: { ...draftFor(listing), price: event.target.value } })
+                }
+                className="h-9 w-24 rounded-[6px] border border-[#CECECE] px-2 tabular-nums"
+              />
+              <input
+                value={draftFor(listing).capacity}
+                onChange={(event) =>
+                  setAmendments({ ...amendments, [listing.listing_id]: { ...draftFor(listing), capacity: event.target.value } })
+                }
+                className="h-9 w-20 rounded-[6px] border border-[#CECECE] px-2 tabular-nums"
+              />
+              <button type="button" onClick={() => void amend(listing)} className="h-9 rounded-[6px] border border-[#CECECE] px-3 font-semibold">
+                Amend
+              </button>
+              <button type="button" onClick={() => void cancel(listing)} className="h-9 rounded-[6px] border border-[#CECECE] px-3 text-[#B00020]">
+                Cancel
+              </button>
+            </div>
           </article>
         ))}
       </section>

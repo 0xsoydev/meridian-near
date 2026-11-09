@@ -668,12 +668,17 @@ impl Core {
     }
 
     fn store_cap(&mut self, owner: &AccountId, key: String, per_day: u128) {
+        let today = day();
+        let used = match self.caps.get(&(owner.clone(), key.clone())) {
+            Some(cap) if cap.day == today => cap.used,
+            _ => 0,
+        };
         self.caps.insert(
             (owner.clone(), key.clone()),
             Cap {
                 per_day,
-                day: day(),
-                used: 0,
+                day: today,
+                used,
             },
         );
         emit(
@@ -885,6 +890,28 @@ mod tests {
         fund(&mut core, accounts(0), 1_000_000, msg);
         testing_env!(context(accounts(1)).build());
         core.pull(accounts(0), "k".to_string(), U128(500_001));
+    }
+
+    #[test]
+    fn raising_the_cap_keeps_todays_usage() {
+        let mut core = core();
+        let msg = r#"{"fund":{"cap":{"key":"k","per_day":"500000"}}}"#;
+        fund(&mut core, accounts(0), 1_000_000, msg);
+        testing_env!(context(accounts(1)).build());
+        core.pull(accounts(0), "k".to_string(), U128(300_000));
+
+        let mut builder = context(accounts(0));
+        builder.attached_deposit(NearToken::from_yoctonear(1));
+        testing_env!(builder.build());
+        core.set_cap("k".to_string(), U128(1_000_000));
+
+        let cap = core.cap(accounts(0), "k".to_string());
+        assert_eq!(cap.used_today.0, 300_000);
+        assert_eq!(cap.left.0, 700_000);
+
+        testing_env!(context(accounts(1)).build());
+        let left = core.pull(accounts(0), "k".to_string(), U128(700_000));
+        assert_eq!(left.0, 0);
     }
 
     #[test]

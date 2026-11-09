@@ -296,3 +296,24 @@ export type Rollup = {
 export type IndexPost = { model: string; price_micro_per_mtok: string; at: number };
 
 export type MarketIndex = { model: string; priceMicroPerMtok: string };
+
+export type IntentToken = {
+  assetId: string;
+  symbol: string;
+  blockchain: string;
+};
+
+export type IntentQuote = {
+  depositAddress: string;
+  amountIn: string;
+  amountOut: string;
+  deadline: string;
+};
+
+export type IntentStatus =
+  | "PENDING_DEPOSIT"
+  | "PROCESSING"
+  | "SUCCESS"
+  | "INCOMPLETE_DEPOSIT"
+  | "REFUNDED"
+  | "FAILED";

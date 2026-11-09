@@ -7,6 +7,7 @@ import { db } from "../../../../../lib/db.ts";
 import { fail } from "../../../../../lib/errors.ts";
 import { release, reserve, reservePrepaid, settle, type SettleInput } from "../../../../../lib/ledger.ts";
 import { refill, topUp } from "../../../../../lib/pay.ts";
+import { fetchProof } from "../../../../../lib/proof.ts";
 import {
   charge,
   estimatePromptTokens,
@@ -255,8 +256,16 @@ async function attempt(input: Attempt): Promise<Response | null> {
   const finish = async (): Promise<void> => {
     if (closed) return;
     close();
+    const proof =
+      input.candidate.rail.id === "near-ai" && seen.upstreamId
+        ? await fetchProof(
+            input.candidate.rail.baseUrl,
+            open(input.candidate.credential),
+            seen.upstreamId,
+          ).catch(() => null)
+        : null;
     try {
-      await settle(settlement(input, seen));
+      await settle({ ...settlement(input, seen), proof: proof ? JSON.stringify(proof) : null });
     } catch (error) {
       console.error("settle failed; the keeper sweep will release the hold", usageId, error);
     }
@@ -318,7 +327,7 @@ async function attempt(input: Attempt): Promise<Response | null> {
   }
 }
 
-function settlement(input: Attempt, seen: Seen): SettleInput {
+function settlement(input: Attempt, seen: Seen): Omit<SettleInput, "proof"> {
   const { candidate } = input;
   const promptTokens = seen.usage ? BigInt(seen.usage.prompt_tokens) : estimatePromptTokens(input.promptBytes);
   const completionTokens = seen.usage

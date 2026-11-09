@@ -20,8 +20,9 @@ Built for the NEAR Hackathon, tracks `defi` and `agents`.
 - The router: OpenAI-compatible streaming, prepaid MTokens, spot and limit orders, resale, a matcher, and a float that refills from the owner's wallet inside the on-chain limit.
 - The keeper: rollups, index posts, liquidations and daily payouts over NEAR.
 - The app: wallet, agent approval, trade, perps, sell and receipts pages on `@hot-labs/near-connect`.
+- 1Click deposits and withdrawals from and to other chains, and NEAR AI response proofs verified on `/receipts`.
 
-Not built yet: perp trade history, the 1Click UI beyond quotes, and the subscription OAuth rails (see `docs/plan.md`).
+Not built yet: perp trade history and the subscription OAuth rails (see `docs/plan.md`).
 
 ## Run it
 

@@ -84,6 +84,7 @@ export type SettleInput = {
   chargeMicro: bigint;
   sellerEarningMicro: bigint;
   upstreamRequestId: string | null;
+  proof: string | null;
 };
 
 export async function settle(input: SettleInput): Promise<void> {
@@ -98,6 +99,7 @@ export async function settle(input: SettleInput): Promise<void> {
         charge_usd_micro = case when usage.prepaid_id is null then ${input.chargeMicro}::bigint else 0 end,
         seller_earning_usd_micro = case when usage.prepaid_id is null then ${input.sellerEarningMicro}::bigint else 0 end,
         upstream_request_id = ${input.upstreamRequestId},
+        proof = ${input.proof},
         settled_at = now()
       where id = ${input.usageId} and status = 'open'
       returning reserved_tokens, reserved_usd_micro, listing_id, key_id, prepaid_id, charge_usd_micro
