@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { isAddress, verifyMessage, type Address, type Hex } from "viem";
 import { z } from "zod";
 import { db } from "./db.ts";
+import { verifyNearSignature } from "./near.ts";
 import { keys, type KeyRow } from "./schema.ts";
 
 export function hashKey(raw: string): Buffer {
@@ -30,11 +30,15 @@ export function expectedHost(request: Request): string {
   return request.headers.get("host") ?? new URL(request.url).host;
 }
 
-const envelopeSchema = z.object({
-  address: z.custom<Address>((value) => typeof value === "string" && isAddress(value, { strict: false })),
-  message: z.string().min(1).max(2000),
-  signature: z.custom<Hex>((value) => typeof value === "string" && /^0x[0-9a-fA-F]{130}$/.test(value)),
-});
+const envelopeSchema = z
+  .object({
+    account_id: z.string().min(2).max(64),
+    public_key: z.string().min(1).max(200),
+    signature: z.string().min(1).max(200),
+    nonce: z.string().min(1).max(100),
+    message: z.string().min(1).max(4000),
+  })
+  .strict();
 
 const intentSchema = z.object({ domain: z.string(), action: z.string(), issued_at: z.string() }).passthrough();
 
@@ -42,7 +46,7 @@ export async function verifySigned(
   envelope: unknown,
   host: string,
   action: string,
-): Promise<{ address: string; intent: Record<string, unknown> } | null> {
+): Promise<{ account: string; intent: Record<string, unknown> } | null> {
   const parsed = envelopeSchema.safeParse(envelope);
   if (!parsed.success) return null;
   let raw: unknown;
@@ -56,15 +60,14 @@ export async function verifySigned(
   if (intent.data.domain !== host || intent.data.action !== action) return null;
   const age = Date.now() - Date.parse(intent.data.issued_at);
   if (!Number.isFinite(age) || age < -60_000 || age > 300_000) return null;
-  try {
-    const valid = await verifyMessage({
-      address: parsed.data.address,
-      message: parsed.data.message,
-      signature: parsed.data.signature,
-    });
-    if (!valid) return null;
-  } catch {
-    return null;
-  }
-  return { address: parsed.data.address.toLowerCase(), intent: intent.data };
+  const valid = await verifyNearSignature({
+    accountId: parsed.data.account_id,
+    publicKey: parsed.data.public_key,
+    signature: parsed.data.signature,
+    nonce: parsed.data.nonce,
+    message: parsed.data.message,
+    recipient: host,
+  });
+  if (!valid) return null;
+  return { account: parsed.data.account_id.toLowerCase(), intent: intent.data };
 }
