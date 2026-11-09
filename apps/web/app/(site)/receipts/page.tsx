@@ -1,18 +1,53 @@
+import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { db } from "../../../lib/db";
 import { MARKETS, readMarket } from "../../../lib/perp";
 import { formatMicroPerMtok, formatMtok } from "../../../lib/price";
+import { attestedSigner, proofValid, type Proof } from "../../../lib/proof";
 import { readRollups } from "../../../lib/rollup";
+import { listings, usage } from "../../../lib/schema";
 
 export const dynamic = "force-dynamic";
 
+const NEARAI = process.env.NEARAI_BASE_URL ?? "https://cloud-api.near.ai/v1";
+
+type ProofRow = { at: Date; raw: string | null; model: string };
+
+async function recentProofs(): Promise<ProofRow[]> {
+  try {
+    return await db()
+      .select({ at: usage.createdAt, raw: usage.proof, model: listings.model })
+      .from(usage)
+      .innerJoin(listings, eq(listings.id, usage.listingId))
+      .where(and(eq(usage.rail, "near-ai"), isNotNull(usage.proof)))
+      .orderBy(desc(usage.createdAt))
+      .limit(20);
+  } catch {
+    return [];
+  }
+}
+
+function parse(raw: string | null): Proof | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Proof;
+  } catch {
+    return null;
+  }
+}
+
 export default async function ReceiptsPage() {
   const since = Math.floor(Date.now() / 60_000) - 120;
-  const rows = await Promise.all(
-    MARKETS.map(async (model) => ({
-      model,
-      market: await readMarket(model).catch(() => null),
-      rollups: await readRollups(model, since).catch(() => []),
-    })),
-  );
+  const [markets, proofs, signer] = await Promise.all([
+    Promise.all(
+      MARKETS.map(async (model) => ({
+        model,
+        market: await readMarket(model).catch(() => null),
+        rollups: await readRollups(model, since).catch(() => []),
+      })),
+    ),
+    recentProofs(),
+    attestedSigner(NEARAI).catch(() => null),
+  ]);
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-12">
@@ -21,7 +56,7 @@ export default async function ReceiptsPage() {
         <p className="text-[#555]">Read straight from core. Anyone can recompute the index from these rows.</p>
       </header>
 
-      {rows.map((row) => (
+      {markets.map((row) => (
         <section key={row.model} className="flex flex-col gap-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-xl font-semibold">{row.model}</h2>
@@ -59,6 +94,25 @@ export default async function ReceiptsPage() {
           )}
         </section>
       ))}
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-xl font-semibold">NEAR AI proofs</h2>
+        <p className="text-sm text-[#555]">
+          {signer ? `attested gateway signer ${signer.slice(0, 20)}…` : "attestation report unavailable"}
+        </p>
+        {proofs.length === 0 && <p className="text-sm text-[#777]">No signed responses yet.</p>}
+        {proofs.map((row) => {
+          const proof = parse(row.raw);
+          const valid = proof ? proofValid(proof) : false;
+          return (
+            <p key={row.at.toISOString()} className="text-sm tabular-nums text-[#555]">
+              {row.at.toISOString().slice(11, 19)} · {row.model} · {proof?.signature_kind ?? "?"} ·{" "}
+              {valid ? "signature verified" : "not verified"} · {proof?.signing_address.slice(0, 16) ?? "—"}…
+            </p>
+          );
+        })}
+        <p className="text-xs text-[#777]">Full TDX and NVIDIA verification: cloud.near.ai/verify.</p>
+      </section>
     </main>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatMicroPerMtok, formatUsd, parseUsd } from "../../../lib/price";
-import type { KeySummary } from "../../../lib/types";
+import type { IntentQuote, IntentStatus, IntentToken, KeySummary } from "../../../lib/types";
 import { useNear } from "../providers";
 
 const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
@@ -17,6 +17,17 @@ export default function KeysPage() {
   const [limits, setLimits] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [intentTokens, setIntentTokens] = useState<IntentToken[]>([]);
+  const [fundAsset, setFundAsset] = useState("");
+  const [fundAmount, setFundAmount] = useState("10");
+  const [fundRefund, setFundRefund] = useState("");
+  const [fundQuote, setFundQuote] = useState<IntentQuote | null>(null);
+  const [fundStatus, setFundStatus] = useState<IntentStatus | null>(null);
+  const [withdrawAsset, setWithdrawAsset] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("5");
+  const [withdrawRecipient, setWithdrawRecipient] = useState("");
+  const [withdrawQuote, setWithdrawQuote] = useState<IntentQuote | null>(null);
+  const [withdrawStatus, setWithdrawStatus] = useState<IntentStatus | null>(null);
 
   const load = useCallback(async () => {
     if (!accountId) return;
@@ -40,6 +51,43 @@ export default function KeysPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    fetch("/api/v1/quotes/tokens")
+      .then(async (response) => (response.ok ? ((await response.json()) as { data: IntentToken[] }).data : []))
+      .then((list) => {
+        setIntentTokens(list);
+        setFundAsset(list[0]?.assetId ?? "");
+        setWithdrawAsset(list[0]?.assetId ?? "");
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!fundQuote || (fundStatus !== null && fundStatus !== "PENDING_DEPOSIT" && fundStatus !== "PROCESSING")) return;
+    const timer = setInterval(() => {
+      fetch(`/api/v1/quotes/${fundQuote.depositAddress}`)
+        .then(async (response) => (response.ok ? ((await response.json()) as { status: IntentStatus }).status : null))
+        .then((status) => {
+          if (status) setFundStatus(status);
+        })
+        .catch(() => undefined);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [fundQuote, fundStatus]);
+
+  useEffect(() => {
+    if (!withdrawQuote || (withdrawStatus !== null && withdrawStatus !== "PENDING_DEPOSIT" && withdrawStatus !== "PROCESSING")) return;
+    const timer = setInterval(() => {
+      fetch(`/api/v1/quotes/${withdrawQuote.depositAddress}`)
+        .then(async (response) => (response.ok ? ((await response.json()) as { status: IntentStatus }).status : null))
+        .then((status) => {
+          if (status) setWithdrawStatus(status);
+        })
+        .catch(() => undefined);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [withdrawQuote, withdrawStatus]);
 
   const fund = async () => {
     const micro = parseUsd(amount);
@@ -141,6 +189,13 @@ export default function KeysPage() {
   };
 
   const revoke = async (key: KeySummary) => {
+    if (
+      !window.confirm(
+        "Revoking forfeits any prepaid MTokens on this key. The float is refunded in the next payout. Continue?",
+      )
+    ) {
+      return;
+    }
     const envelope = await sign("revoke_key", { key_id: key.key_id });
     if (!envelope) return;
     const response = await fetch("/api/v1/keys/revoke", {
@@ -155,6 +210,102 @@ export default function KeysPage() {
     }
     await load();
   };
+
+  const getFundQuote = async () => {
+    const micro = parseUsd(fundAmount);
+    if (micro === null || !fundAsset || !fundRefund) {
+      setError("pick a chain, an amount and a refund address");
+      return;
+    }
+    setFundStatus(null);
+    setFundQuote(null);
+    const response = await fetch("/api/v1/quotes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "fund",
+        owner: accountId,
+        originAsset: fundAsset,
+        amount: micro.toString(),
+        refundTo: fundRefund,
+      }),
+    });
+    const body = (await response.json()) as IntentQuote & { error?: { message: string } };
+    if (!response.ok) {
+      setError(body.error?.message ?? "could not quote the deposit");
+      return;
+    }
+    setFundQuote(body);
+  };
+
+  const getWithdrawQuote = async () => {
+    const micro = parseUsd(withdrawAmount);
+    if (micro === null || !withdrawAsset || !withdrawRecipient) {
+      setError("pick a chain, an amount and a destination address");
+      return;
+    }
+    setWithdrawStatus(null);
+    setWithdrawQuote(null);
+    const response = await fetch("/api/v1/quotes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "withdraw",
+        account: accountId,
+        destinationAsset: withdrawAsset,
+        amount: micro.toString(),
+        recipient: withdrawRecipient,
+      }),
+    });
+    const body = (await response.json()) as IntentQuote & { error?: { message: string } };
+    if (!response.ok) {
+      setError(body.error?.message ?? "could not quote the withdrawal");
+      return;
+    }
+    setWithdrawQuote(body);
+  };
+
+  const sendWithdraw = async () => {
+    const micro = parseUsd(withdrawAmount);
+    if (micro === null || !withdrawQuote) return;
+    const ok = await send([
+      {
+        receiverId: USDC,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: {
+              methodName: "storage_deposit",
+              args: { account_id: withdrawQuote.depositAddress, registration_only: true },
+              gas: "30000000000000",
+              deposit: "1250000000000000000000",
+            },
+          },
+        ],
+      },
+      {
+        receiverId: CORE,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: {
+              methodName: "withdraw",
+              args: { amount: micro.toString(), to: withdrawQuote.depositAddress },
+              gas: "50000000000000",
+              deposit: "1",
+            },
+          },
+        ],
+      },
+    ]);
+    if (!ok) {
+      setError("the withdrawal was not signed");
+      return;
+    }
+    setWithdrawStatus("PENDING_DEPOSIT");
+  };
+
+  const external = intentTokens.filter((token) => token.blockchain !== "near");
 
   if (!accountId) {
     return (
@@ -189,6 +340,56 @@ export default function KeysPage() {
         <button type="button" disabled={busy} onClick={() => void withdraw()} className="h-10 rounded-[6px] border border-[#CECECE] px-4 font-semibold disabled:text-[#999]">
           Withdraw
         </button>
+      </section>
+
+      <section className="grid gap-6 rounded-[8px] border border-[#CECECE] p-5 md:grid-cols-2">
+        <div className="flex flex-col gap-3">
+          <h2 className="text-xl font-semibold">From another chain</h2>
+          <select value={fundAsset} onChange={(event) => setFundAsset(event.target.value)} className="h-10 rounded-[6px] border border-[#CECECE] px-3">
+            {external.map((token) => (
+              <option key={token.assetId} value={token.assetId}>
+                {token.blockchain}
+              </option>
+            ))}
+          </select>
+          <input value={fundAmount} onChange={(event) => setFundAmount(event.target.value)} placeholder="Amount (USDC)" className="h-10 rounded-[6px] border border-[#CECECE] px-3 tabular-nums" />
+          <input value={fundRefund} onChange={(event) => setFundRefund(event.target.value)} placeholder="Your address on that chain (refunds)" className="h-10 rounded-[6px] border border-[#CECECE] px-3 font-mono text-xs" />
+          <button type="button" onClick={() => void getFundQuote()} className="h-10 rounded-[6px] border border-[#CECECE] px-4 font-semibold">
+            Get a deposit address
+          </button>
+          {fundQuote && (
+            <div className="flex flex-col gap-1 text-sm">
+              <p className="text-[#555]">Send at least {formatUsd(BigInt(fundQuote.amountIn))} to</p>
+              <code className="break-all font-mono text-xs">{fundQuote.depositAddress}</code>
+              <p className="text-[#555]">Status: {fundStatus ?? "PENDING_DEPOSIT"}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <h2 className="text-xl font-semibold">Withdraw to another chain</h2>
+          <select value={withdrawAsset} onChange={(event) => setWithdrawAsset(event.target.value)} className="h-10 rounded-[6px] border border-[#CECECE] px-3">
+            {external.map((token) => (
+              <option key={token.assetId} value={token.assetId}>
+                {token.blockchain}
+              </option>
+            ))}
+          </select>
+          <input value={withdrawAmount} onChange={(event) => setWithdrawAmount(event.target.value)} placeholder="Amount (USDC)" className="h-10 rounded-[6px] border border-[#CECECE] px-3 tabular-nums" />
+          <input value={withdrawRecipient} onChange={(event) => setWithdrawRecipient(event.target.value)} placeholder="Destination address" className="h-10 rounded-[6px] border border-[#CECECE] px-3 font-mono text-xs" />
+          <button type="button" onClick={() => void getWithdrawQuote()} className="h-10 rounded-[6px] border border-[#CECECE] px-4 font-semibold">
+            Get a quote
+          </button>
+          {withdrawQuote && (
+            <div className="flex flex-col gap-2 text-sm">
+              <p className="text-[#555]">{formatUsd(BigInt(withdrawQuote.amountOut))} arrives on the other chain</p>
+              <button type="button" onClick={() => void sendWithdraw()} className="h-10 rounded-[6px] bg-black px-4 font-semibold text-white">
+                Send {withdrawAmount} USDC
+              </button>
+              <p className="text-[#555]">Status: {withdrawStatus ?? "waiting for your signature"}</p>
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="flex flex-col gap-4">

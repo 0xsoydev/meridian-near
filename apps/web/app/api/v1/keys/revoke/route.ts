@@ -21,7 +21,7 @@ export async function POST(request: Request): Promise<Response> {
     .limit(1);
   if (!row) return fail(404, "invalid_request", "unknown key");
   if (!(await revokeKey(row.id))) {
-    return fail(409, "invalid_request", "this key still holds a float, bids, MTokens or offers; spend or cancel them first");
+    return fail(409, "invalid_request", "this key still holds bids, MTokens or offers; spend or cancel them first");
   }
   return new Response(null, { status: 204 });
 }

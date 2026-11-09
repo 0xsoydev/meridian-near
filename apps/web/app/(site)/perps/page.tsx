@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatMicroPerMtok, formatMtok, formatUsd, parseMtok, parseUsd } from "../../../lib/price";
+import { orderPlan } from "../../../lib/perp-math";
 import type { PerpAccount } from "../../../lib/types";
 import { useNear } from "../providers";
 
@@ -60,32 +61,32 @@ export default function PerpsPage() {
     void load();
   }, [load]);
 
-  const modify = async (tokens: bigint, micro: bigint) => {
-    if (tokens === 0n) {
-      setMessage("size is zero");
-      return;
-    }
+  const sendLegs = async (marketModel: string, legs: { sizeDelta: bigint; margin: bigint }[]) => {
     if (!accountId) {
       await connect();
       return;
     }
+    if (legs.length === 0) {
+      setMessage("size is zero");
+      return;
+    }
     setBusy(true);
-    const ok = await send([
-      {
+    const ok = await send(
+      legs.map((leg) => ({
         receiverId: CORE,
         actions: [
           {
-            type: "FunctionCall",
+            type: "FunctionCall" as const,
             params: {
               methodName: "modify",
-              args: { model, size_delta: tokens.toString(), margin_delta: micro.toString() },
+              args: { model: marketModel, size_delta: leg.sizeDelta.toString(), margin_delta: leg.margin.toString() },
               gas: "50000000000000",
               deposit: "1",
             },
           },
         ],
-      },
-    ]);
+      })),
+    );
     setBusy(false);
     setMessage(ok ? "signed" : "not signed");
     await load();
@@ -98,7 +99,22 @@ export default function PerpsPage() {
       setMessage("invalid size or margin");
       return;
     }
-    void modify(tokens * direction, micro);
+    const held = account?.positions.find((position) => position.model === model);
+    const current = held ? BigInt(held.size) : 0n;
+    const price = market ? BigInt(market.price_micro_per_mtok) : 0n;
+    const legs = orderPlan(current, tokens * direction, price, 5n).map((leg) =>
+      leg.margin > 0n ? { ...leg, margin: micro } : leg,
+    );
+    void sendLegs(model, legs);
+  };
+
+  const adjustMargin = (marketModel: string, sign: 1n | -1n) => {
+    const micro = parseUsd(margin);
+    if (micro === null || micro === 0n) {
+      setMessage("invalid margin");
+      return;
+    }
+    void sendLegs(marketModel, [{ sizeDelta: 0n, margin: micro * sign }]);
   };
 
   return (
@@ -166,13 +182,29 @@ export default function PerpsPage() {
                 {formatMicroPerMtok(BigInt(position.liquidation_price_micro_per_mtok))}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => void modify(-BigInt(position.size), 0n)}
-              className="h-9 rounded-[6px] border border-[#CECECE] px-3 font-semibold"
-            >
-              Close
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => adjustMargin(position.model, 1n)}
+                className="h-9 rounded-[6px] border border-[#CECECE] px-3 font-semibold"
+              >
+                Add margin
+              </button>
+              <button
+                type="button"
+                onClick={() => adjustMargin(position.model, -1n)}
+                className="h-9 rounded-[6px] border border-[#CECECE] px-3 font-semibold"
+              >
+                Remove margin
+              </button>
+              <button
+                type="button"
+                onClick={() => void sendLegs(position.model, [{ sizeDelta: -BigInt(position.size), margin: 0n }])}
+                className="h-9 rounded-[6px] border border-[#CECECE] px-3 font-semibold"
+              >
+                Close
+              </button>
+            </div>
           </article>
         ))}
       </section>

@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, desc, eq, gt, notExists } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { hashKey } from "./auth.ts";
 import { db } from "./db.ts";
-import { accounts, bids, keys, offers, prepaid } from "./schema.ts";
+import { accounts, keys } from "./schema.ts";
 import type { KeySummary } from "./types";
 
 export async function ensureAccount(address: string): Promise<{ id: string }> {
@@ -44,25 +44,29 @@ export async function createKey(
 }
 
 export async function revokeKey(id: string): Promise<boolean> {
-  const rows = await db()
-    .update(keys)
-    .set({ hash: randomBytes(32) })
-    .where(
-      and(
-        eq(keys.id, id),
-        eq(keys.balanceUsdMicro, 0n),
-        notExists(db().select({ id: bids.id }).from(bids).where(and(eq(bids.keyId, id), eq(bids.status, "open")))),
-        notExists(db().select({ id: offers.id }).from(offers).where(and(eq(offers.keyId, id), eq(offers.status, "open")))),
-        notExists(
-          db()
-            .select({ id: prepaid.id })
-            .from(prepaid)
-            .where(and(eq(prepaid.keyId, id), gt(prepaid.tokensRemaining, 0n))),
-        ),
-      ),
+  const result = await db().execute<{ revoked: number }>(sql`
+    with old as (
+      select id, account_id, balance_usd_micro
+      from keys
+      where id = ${id}
+        and not exists (select 1 from bids where key_id = ${id} and status = 'open')
+        and not exists (select 1 from offers where key_id = ${id} and status = 'open')
+        and not exists (select 1 from prepaid where key_id = ${id} and tokens_remaining > 0)
+      for update
+    ), upd as (
+      update keys set hash = ${randomBytes(32)}, balance_usd_micro = 0
+      where id = (select id from old)
+      returning id
+    ), refund as (
+      insert into payouts (account_id, day, amount_usd_micro, kind, status)
+      select account_id, (now() at time zone 'utc')::date, balance_usd_micro, 'refund', 'pending'
+      from old
+      where balance_usd_micro > 0 and exists (select 1 from upd)
+      returning id
     )
-    .returning({ id: keys.id });
-  return rows.length > 0;
+    select (select count(*) from upd)::int as revoked
+  `);
+  return (result.rows[0]?.revoked ?? 0) === 1;
 }
 
 export async function listKeys(accountId: string): Promise<KeySummary[]> {
