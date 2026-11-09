@@ -44,7 +44,7 @@ export async function startDevice(name: string, capMicro: bigint | null): Promis
     device_code: deviceCode,
     user_code: code,
     verification_uri_complete: url,
-    qr: await QRCode.toString(url, { type: "utf8", margin: 1 }),
+    qr: await QRCode.toString(url, { type: "utf8" }),
     expires_at: expiresAt.toISOString(),
     interval: INTERVAL_S,
   };
