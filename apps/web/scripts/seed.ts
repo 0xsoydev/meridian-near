@@ -13,47 +13,84 @@ function required(name: string): string {
   return value;
 }
 
-const MODEL = process.env.SEED_MODEL ?? "glm-5.3-flash";
-const PRICE = BigInt(process.env.SEED_PRICE_MICRO ?? "180000");
-const CAPACITY_MTOK = process.env.SEED_CAPACITY_MTOK ?? "100";
-const NONCE = "seed-near-ai-house";
+const CAPACITY = 100n * 1_000_000n;
+
+async function listing(input: {
+  sellerId: string;
+  rail: string;
+  model: string;
+  price: bigint;
+  key: string;
+  nonce: string;
+}): Promise<void> {
+  const existing = await db()
+    .select({ id: listings.id })
+    .from(listings)
+    .where(eq(listings.clientNonce, input.nonce))
+    .limit(1);
+  if (existing[0]) {
+    console.log(`seed: ${input.rail} listing already exists (${existing[0].id})`);
+    return;
+  }
+  const [row] = await db()
+    .insert(listings)
+    .values({
+      sellerId: input.sellerId,
+      rail: input.rail,
+      model: input.model,
+      credentialCiphertext: seal(input.key),
+      priceMicroPerMtok: input.price,
+      capacityTokens: CAPACITY,
+      status: "active",
+      clientNonce: input.nonce,
+    })
+    .returning({ id: listings.id });
+  console.log(`seed: ${input.rail} listing ${row?.id ?? "?"} on ${input.model} at ${input.price} micro/MTok`);
+}
 
 async function main(): Promise<void> {
   const owner = required("NEAR_OWNER_ID").toLowerCase();
   const account = await ensureAccount(owner);
-  const existing = await db().select({ id: listings.id }).from(listings).where(eq(listings.clientNonce, NONCE)).limit(1);
-  if (existing[0]) {
-    console.log(`seed: house listing already exists (${existing[0].id})`);
+
+  const nearai = process.env.NEARAI_API_KEY;
+  if (nearai) {
+    await listing({
+      sellerId: account.id,
+      rail: "near-ai",
+      model: process.env.SEED_MODEL ?? "glm-5.3-flash",
+      price: BigInt(process.env.SEED_PRICE_MICRO ?? "180000"),
+      key: nearai,
+      nonce: "seed-near-ai-house",
+    });
   } else {
-    const [row] = await db()
-      .insert(listings)
-      .values({
-        sellerId: account.id,
-        rail: "near-ai",
-        model: MODEL,
-        credentialCiphertext: seal(required("NEARAI_API_KEY")),
-        priceMicroPerMtok: PRICE,
-        capacityTokens: BigInt(CAPACITY_MTOK) * 1_000_000n,
-        status: "active",
-        clientNonce: NONCE,
-      })
-      .returning({ id: listings.id });
-    console.log(`seed: house listing ${row?.id ?? "?"} at ${PRICE} micro/MTok`);
+    console.log("seed: NEARAI_API_KEY missing, skipping the house listing");
+  }
+
+  if (process.env.STUB_RAIL_URL) {
+    await listing({
+      sellerId: account.id,
+      rail: "stub",
+      model: "glm-5.3",
+      price: 180_000n,
+      key: "sk-stub",
+      nonce: "seed-stub-house",
+    });
   }
 
   const core = coreId();
   const usdc = usdcId();
+  const network = process.env.NEAR_NETWORK ?? "testnet";
   console.log(`\nOwner commands (run these once, from the team wallet):\n`);
   for (const market of MARKETS) {
     console.log(
-      `near contract call-function as-transaction ${core} list_market json-args '{"model":"${market}","max_leverage":5,"max_oi":"1000000000000","funding_k":"277777777778"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as ${owner} network-config ${process.env.NEAR_NETWORK ?? "testnet"} sign-with-keychain send`,
+      `near contract call-function as-transaction ${core} list_market json-args '{"model":"${market}","max_leverage":5,"max_oi":"1000000000000","funding_k":"277777777778"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as ${owner} network-config ${network} sign-with-keychain send`,
     );
   }
   console.log(
-    `near contract call-function as-transaction ${usdc} ft_transfer_call json-args '{"receiver_id":"${core}","amount":"25000000","msg":"{\\"fund_vault\\":{}}"}' prepaid-gas '100 Tgas' attached-deposit '1 yoctoNEAR' sign-as ${owner} network-config ${process.env.NEAR_NETWORK ?? "testnet"} sign-with-keychain send`,
+    `near contract call-function as-transaction ${usdc} ft_transfer_call json-args '{"receiver_id":"${core}","amount":"20000000","msg":"{\\"fund_vault\\":{}}"}' prepaid-gas '100 Tgas' attached-deposit '1 yoctoNEAR' sign-as ${owner} network-config ${network} sign-with-keychain send`,
   );
   console.log(
-    `near contract call-function as-transaction ${core} set_cap json-args '{"key":"demo","per_day":"2000000"}' prepaid-gas '30 Tgas' attached-deposit '1 yoctoNEAR' sign-as ${owner} network-config ${process.env.NEAR_NETWORK ?? "testnet"} sign-with-keychain send`,
+    `near contract call-function as-transaction ${core} set_cap json-args '{"key":"demo","per_day":"2000000"}' prepaid-gas '30 Tgas' attached-deposit '1 yoctoNEAR' sign-as ${owner} network-config ${network} sign-with-keychain send`,
   );
   console.log(`\nnonce ${randomUUID()}`);
 }

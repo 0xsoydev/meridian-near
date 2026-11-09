@@ -132,7 +132,7 @@ pub struct CapMsg {
 #[serde(crate = "near_sdk::serde", rename_all = "snake_case")]
 pub enum FundMsg {
     Fund { to: Option<AccountId>, cap: Option<CapMsg> },
-    FundVault,
+    FundVault {},
 }
 
 #[derive(Deserialize, Serialize)]
@@ -194,7 +194,7 @@ impl Core {
             return PromiseOrValue::Value(U128(amount));
         };
         match action {
-            FundMsg::FundVault => {
+            FundMsg::FundVault {} => {
                 require!(sender_id == self.owner, "owner only");
                 self.vault += amount;
                 emit("vault_funded", near_sdk::serde_json::json!({ "amount": amount.to_string() }));
@@ -890,6 +890,14 @@ mod tests {
         fund(&mut core, accounts(0), 1_000_000, msg);
         testing_env!(context(accounts(1)).build());
         core.pull(accounts(0), "k".to_string(), U128(500_001));
+    }
+
+    #[test]
+    fn the_vault_takes_an_owner_fund() {
+        let mut core = core();
+        let unused = fund(&mut core, accounts(0), 1_000_000, r#"{"fund_vault":{}}"#);
+        assert_eq!(unused, 0);
+        assert_eq!(core.treasury().vault.0, 1_000_000);
     }
 
     #[test]
