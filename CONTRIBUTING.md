@@ -40,7 +40,7 @@ Verify end to end that what you just implemented works as intended, and introduc
 - Prove the contract did not move: request fields, response fields, status codes, database columns, env names, signatures. If one changed on purpose, update the handoff and tell the consumers.
 - Check invariants after your path: balance, reserved, capacity, listing status, no `open` usage rows.
 - Migrations are forward-only and safe to run twice.
-- Contracts: `forge test` plus one call against the deployed address.
+- Contracts: `cargo test` in `contracts/core`, plus one call against the deployed account.
 - UI: click it with data, with no data, and with no wallet.
 - Nothing embarrassing in the diff: no `.env`, no keys, no debug prints, no commented-out code, no build output.
 - Put the evidence in the PR: one line per check, and one line for anything unverified.
@@ -51,7 +51,7 @@ A feature that works in isolation but breaks the demo path is not done. If you c
 
 - `pnpm typecheck` passes
 - `pnpm build` passes
-- `forge test` passes if you touched `contracts/`
+- `cargo test` passes if you touched `contracts/core`
 - The "done when" line in your handoff is true
 - Non-trivial logic has one runnable check
 
