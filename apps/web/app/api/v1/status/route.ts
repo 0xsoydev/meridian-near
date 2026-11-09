@@ -21,9 +21,9 @@ export async function GET(): Promise<Response> {
         };
       }),
     ),
-    db().execute<{ pending: number; scheduled: number; last_executed: string | null }>(sql`
+    db().execute<{ pending: number; executed: number; last_executed: string | null }>(sql`
       select count(*) filter (where status = 'pending')::int as pending,
-             count(*) filter (where status = 'scheduled')::int as scheduled,
+             count(*) filter (where status = 'executed')::int as executed,
              max(day) filter (where status = 'executed')::text as last_executed
       from payouts
     `),
@@ -40,8 +40,8 @@ export async function GET(): Promise<Response> {
     markets,
     payouts: {
       pending: payouts.rows[0]?.pending ?? 0,
-      scheduled: payouts.rows[0]?.scheduled ?? 0,
-      last_executed_day: payouts.rows[0]?.last_executed ?? null,
+      executed: payouts.rows[0]?.executed ?? 0,
+      last_day: payouts.rows[0]?.last_executed ?? null,
     },
     venue: { fills_24h: venue.rows[0]?.fills ?? 0, volume_24h_tokens: venue.rows[0]?.volume ?? "0", open_asks: open.length },
   };

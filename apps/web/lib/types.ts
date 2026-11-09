@@ -101,6 +101,8 @@ export type KeySummary = {
   key_id: string;
   name: string;
   float_usd_micro: string;
+  cap_key: string | null;
+  cap: CapSummary | null;
   created_at: string;
 };
 

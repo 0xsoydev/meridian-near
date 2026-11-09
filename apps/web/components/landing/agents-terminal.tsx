@@ -17,36 +17,36 @@ const MUTED = "text-[#9A9A9A]";
 
 const STEPS: TabContent[] = [
   {
-    label: "top-up",
-    command: 'curl -X POST "$MERIDIAN/api/v1/topup?usd=0.10"',
+    label: "approve",
+    command: `curl -X POST $MERIDIAN/api/v1/device -d '{"name":"claude-code","cap_usd_micro":"5000000"}'`,
     lines: [
-      { text: "← 402 Payment Required", color: ROUTE, delay: 450 },
-      { text: "  x402: 0.10 USDC on hedera-testnet to the venue treasury", color: MUTED, delay: 300 },
-      { text: "→ paid from 0.0.11223929, tx 0.0.7162784-1793971550.448302558", color: MUTED, delay: 1100 },
-      { text: "✓ 200 credited $0.10, router key minted", color: OK, delay: 900 },
+      { text: "← 201 Created, device code and a QR", color: ROUTE, delay: 450 },
+      { text: "  open $MERIDIAN/a/7KQ2XM with a NEAR wallet", color: MUTED, delay: 300 },
+      { text: "  set_cap(key, $5/day) on core.<team>.near", color: MUTED, delay: 900 },
+      { text: "✓ key minted, the agent never sees the wallet", color: OK, delay: 900 },
     ],
   },
   {
     label: "buy",
-    command: `curl -X POST $MERIDIAN/api/v1/trades -d '{"model":"0gm-1.0-35b-a3b","tokens":"100000"}'`,
+    command: `curl -X POST $MERIDIAN/api/v1/trades -d '{"model":"glm-5.3-flash","tokens":"100000"}'`,
     lines: [
-      { text: "  best ask 0.153 USD/MTok on the 0G rail", color: MUTED, delay: 450 },
-      { text: "  quote 0.1 MTok for $0.0153", color: ROUTE, delay: 500 },
-      { text: "✓ filled 0.1 MTok for $0.0153 in 1 fill", color: OK, delay: 800 },
+      { text: "  best ask 0.175 USD/MTok on the NEAR AI rail", color: MUTED, delay: 450 },
+      { text: "  quote 0.1 MTok for $0.0175", color: ROUTE, delay: 500 },
+      { text: "✓ filled 0.1 MTok for $0.0175 in 1 fill", color: OK, delay: 800 },
     ],
   },
   {
     label: "inference",
     command: 'curl $MERIDIAN/api/v1/chat/completions -H "Authorization: Bearer $KEY" -d @prompt.json',
     lines: [
-      { text: "  routed to the 0G rail at the cheapest live ask", color: ROUTE, delay: 500 },
+      { text: "  routed to the NEAR AI rail at the cheapest live ask", color: ROUTE, delay: 500 },
       { text: "  paid from the MTokens just bought", color: MUTED, delay: 400 },
       { text: "✓ 200 answer streamed, 1,400 tokens used", color: OK, delay: 1000 },
     ],
   },
   {
     label: "sell",
-    command: `curl -X POST $MERIDIAN/api/v1/sells -d '{"model":"0gm-1.0-35b-a3b","tokens":"98600"}'`,
+    command: `curl -X POST $MERIDIAN/api/v1/sells -d '{"model":"glm-5.3-flash","tokens":"98600"}'`,
     lines: [
       { text: "  holding 0.0986 MTok after the answer", color: MUTED, delay: 450 },
       { text: "  best bid 0.15 USD/MTok", color: MUTED, delay: 400 },

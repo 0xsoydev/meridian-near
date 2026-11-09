@@ -1,20 +1,12 @@
-import { keccak256, toBytes, type Account, type Address, type Chain, type Hash, type Transport, type WalletClient } from "viem";
-import { indexOracleAbi, mockUsdcAbi, perpMarketAbi } from "./abi.ts";
-import { addresses, galileo, publicClient } from "./chain.ts";
+import { view } from "./near.ts";
+import type { PerpAccount } from "./types";
 
-export const MARKETS = ["glm-5.3", "0gm-1.0-35b-a3b", "deepseek-v4.1-flash"] as const;
-export const LOG_CHUNK = 2_000n;
+export const MARKETS = ["glm-5.3-flash", "glm-5.3", "deepseek-v4.1-flash"] as const;
 
 const MM_BPS = 500n;
 const SEARCH_CEILING = 1n << 128n;
 
-export type PerpWallet = WalletClient<Transport, Chain, Account>;
-
 export type PositionMath = { size: bigint; margin: bigint; entryPrice: bigint; fundingOwed: bigint };
-
-export function marketId(model: string): Hash {
-  return keccak256(toBytes(model));
-}
 
 function pnl(size: bigint, entryPrice: bigint, price: bigint): bigint {
   return (size * (price - entryPrice)) / 1_000_000n;
@@ -26,8 +18,7 @@ export function notional(size: bigint, price: bigint): bigint {
 
 export function liquidatable(p: PositionMath, price: bigint): boolean {
   const equity = p.margin + pnl(p.size, p.entryPrice, price) - p.fundingOwed;
-  const notional = ((p.size < 0n ? -p.size : p.size) * price) / 1_000_000n;
-  return equity * 10_000n < notional * MM_BPS;
+  return equity * 10_000n < notional(p.size, price) * MM_BPS;
 }
 
 export function liquidationPrice(p: PositionMath): bigint {
@@ -64,10 +55,17 @@ export function positionAfter(
   const last = legs.at(-1);
   if (size === 0n || !last) return null;
   const fee = tradeFee(last.sizeDelta, price);
-  if (!current || held === 0n || legs.length === 2) return { size, margin: last.margin - fee, entryPrice: price, fundingOwed: 0n };
+  if (!current || held === 0n || legs.length === 2) {
+    return { size, margin: last.margin - fee, entryPrice: price, fundingOwed: 0n };
+  }
   const settled = current.margin - current.fundingOwed - fee;
   if (last.margin === 0n) {
-    return { size, margin: settled + pnl(held - size, current.entryPrice, price), entryPrice: current.entryPrice, fundingOwed: 0n };
+    return {
+      size,
+      margin: settled + pnl(held - size, current.entryPrice, price),
+      entryPrice: current.entryPrice,
+      fundingOwed: 0n,
+    };
   }
   const before = held < 0n ? -held : held;
   const total = size < 0n ? -size : size;
@@ -97,107 +95,72 @@ export function orderPlan(
   ];
 }
 
-export async function readMarket(model: string) {
-  const client = publicClient();
-  const { perpMarket, indexOracle } = addresses();
-  const id = marketId(model);
-  const [[price, updatedAt], market, rate] = await Promise.all([
-    client.readContract({ address: indexOracle, abi: indexOracleAbi, functionName: "latest", args: [id] }),
-    client.readContract({ address: perpMarket, abi: perpMarketAbi, functionName: "markets", args: [id] }),
-    client.readContract({ address: perpMarket, abi: perpMarketAbi, functionName: "fundingRate", args: [id] }),
-  ]);
-  return { price, updatedAt, longOi: market[3], shortOi: market[4], fundingRatePerHour: rate * 3600n };
-}
+type MarketView = {
+  listed: boolean;
+  price: string;
+  updated_at: number;
+  long_oi: string;
+  short_oi: string;
+  funding_rate: string;
+  max_leverage: number;
+  max_oi: string;
+};
 
-export async function readPosition(model: string, account: Address) {
-  const client = publicClient();
-  const { perpMarket, indexOracle } = addresses();
-  const id = marketId(model);
-  const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
-  const [position, equity, [price]] = await Promise.all([
-    client.readContract({ address: perpMarket, abi: perpMarketAbi, functionName: "positions", args: [account, id], blockNumber }),
-    client.readContract({ address: perpMarket, abi: perpMarketAbi, functionName: "equity", args: [account, id], blockNumber }),
-    client.readContract({ address: indexOracle, abi: indexOracleAbi, functionName: "latest", args: [id], blockNumber }),
-  ]);
-  const fundingOwed = position.margin + pnl(position.size, position.entryPrice, price) - equity;
+type PositionView = {
+  size: string;
+  margin: string;
+  entry_price: string;
+  equity: string;
+  funding_owed: string;
+};
+
+export async function readMarket(model: string) {
+  const market = await view<MarketView>("market", { model });
   return {
-    size: position.size,
-    margin: position.margin,
-    entryPrice: position.entryPrice,
-    equity,
-    fundingOwed,
-    liquidationPrice: liquidationPrice({ ...position, fundingOwed }),
+    listed: market.listed,
+    price: BigInt(market.price),
+    updatedAt: BigInt(market.updated_at),
+    longOi: BigInt(market.long_oi),
+    shortOi: BigInt(market.short_oi),
+    fundingRatePerHour: BigInt(market.funding_rate) * 3600n,
+    maxLeverage: BigInt(market.max_leverage),
+    maxOi: BigInt(market.max_oi),
   };
 }
 
-export async function modify(wallet: PerpWallet, model: string, sizeDelta: bigint, marginDelta: bigint): Promise<Hash> {
-  const client = publicClient();
-  const { perpMarket, mockUsdc } = addresses();
-  if (marginDelta > 0n) {
-    const allowance = await client.readContract({
-      address: mockUsdc,
-      abi: mockUsdcAbi,
-      functionName: "allowance",
-      args: [wallet.account.address, perpMarket],
+export async function readPosition(model: string, account: string) {
+  const position = await view<PositionView>("position", { account, model });
+  const math: PositionMath = {
+    size: BigInt(position.size),
+    margin: BigInt(position.margin),
+    entryPrice: BigInt(position.entry_price),
+    fundingOwed: BigInt(position.funding_owed),
+  };
+  return {
+    size: math.size,
+    margin: math.margin,
+    entryPrice: math.entryPrice,
+    equity: BigInt(position.equity),
+    fundingOwed: math.fundingOwed,
+    liquidationPrice: liquidationPrice(math),
+  };
+}
+
+export async function readAccount(account: string): Promise<PerpAccount> {
+  const wallet = BigInt(await view<string>("wallet", { account }));
+  const positions: PerpAccount["positions"] = [];
+  for (const model of MARKETS) {
+    const position = await readPosition(model, account);
+    if (position.size === 0n) continue;
+    positions.push({
+      model,
+      size: position.size.toString(),
+      margin_usd_micro: position.margin.toString(),
+      entry_price_micro_per_mtok: position.entryPrice.toString(),
+      equity_usd_micro: position.equity.toString(),
+      funding_owed_usd_micro: position.fundingOwed.toString(),
+      liquidation_price_micro_per_mtok: position.liquidationPrice.toString(),
     });
-    if (allowance < marginDelta) {
-      const { request } = await client.simulateContract({
-        account: wallet.account,
-        chain: galileo,
-        address: mockUsdc,
-        abi: mockUsdcAbi,
-        functionName: "approve",
-        args: [perpMarket, marginDelta],
-      });
-      const receipt = await client.waitForTransactionReceipt({ hash: await wallet.writeContract(request) });
-      if (receipt.status !== "success") throw new Error("USDC approval reverted");
-    }
   }
-  const { request } = await client.simulateContract({
-    account: wallet.account,
-    chain: galileo,
-    address: perpMarket,
-    abi: [...perpMarketAbi, ...mockUsdcAbi],
-    functionName: "modify",
-    args: [marketId(model), sizeDelta, marginDelta],
-  });
-  return wallet.writeContract(request);
+  return { account, wallet_usd_micro: wallet.toString(), positions };
 }
-
-export async function liquidate(wallet: PerpWallet, account: Address, model: string): Promise<Hash> {
-  const { request } = await publicClient().simulateContract({
-    account: wallet.account,
-    address: addresses().perpMarket,
-    abi: perpMarketAbi,
-    functionName: "liquidate",
-    args: [account, marketId(model)],
-  });
-  return wallet.writeContract(request);
-}
-
-export async function needsLiquidation(account: Address, model: string): Promise<boolean> {
-  return publicClient().readContract({
-    address: addresses().perpMarket,
-    abi: perpMarketAbi,
-    functionName: "canLiquidate",
-    args: [account, marketId(model)],
-  });
-}
-
-export async function postIndex(
-  wallet: PerpWallet,
-  model: string,
-  price: bigint,
-  seqFrom: bigint,
-  seqTo: bigint,
-): Promise<Hash> {
-  const { request } = await publicClient().simulateContract({
-    account: wallet.account,
-    address: addresses().indexOracle,
-    abi: indexOracleAbi,
-    functionName: "post",
-    args: [marketId(model), price, seqFrom, seqTo],
-  });
-  return wallet.writeContract(request);
-}
-

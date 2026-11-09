@@ -1,10 +1,9 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { useConnection, useDisconnect } from "wagmi";
+import { useNear } from "../app/(site)/providers";
 
 const LINKS = [
   { label: "Trade", href: "/trade" },
@@ -24,9 +23,7 @@ const itemClass = (active: boolean) =>
 export function TradeNav() {
   const pathname = usePathname();
   const isActive = (href: string) => pathname.startsWith(href);
-  const { ready, login, logout } = usePrivy();
-  const { address } = useConnection();
-  const { mutate: disconnect } = useDisconnect();
+  const { accountId, connect, disconnect } = useNear();
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#CECECE] bg-white">
@@ -74,10 +71,10 @@ export function TradeNav() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2.5">
-          {address ? (
+          {accountId ? (
             <details className="group relative">
               <summary className="flex h-[34px] cursor-pointer list-none items-center gap-1.5 rounded-[6px] border border-[#CECECE] bg-white px-3 text-[14px] tabular-nums text-[#1E1E1E] hover:border-[#1743FF] [&::-webkit-details-marker]:hidden">
-                {address.slice(0, 6)}…{address.slice(-4)}
+                {accountId.slice(0, 10)}…
                 <Chevron />
               </summary>
               <div className="absolute right-0 top-full mt-2 w-40 rounded-[6px] border border-[#CECECE] bg-white py-1">
@@ -85,7 +82,7 @@ export function TradeNav() {
                   type="button"
                   onClick={(event) => {
                     event.currentTarget.closest("details")?.removeAttribute("open");
-                    void logout().finally(() => disconnect());
+                    void disconnect();
                   }}
                   className="block w-full px-4 py-2 text-left text-[14px] text-[#1E1E1E] hover:bg-[#F5F5F5]"
                 >
@@ -96,9 +93,8 @@ export function TradeNav() {
           ) : (
             <button
               type="button"
-              disabled={!ready}
-              onClick={() => login()}
-              className="h-[34px] rounded-[6px] bg-black px-4 text-[14px] font-semibold text-white hover:bg-[#1E1E1E] disabled:bg-[#D4D4D4]"
+              onClick={() => void connect()}
+              className="h-[34px] rounded-[6px] bg-black px-4 text-[14px] font-semibold text-white hover:bg-[#1E1E1E]"
             >
               Connect
             </button>

@@ -1,6 +1,6 @@
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { db } from "./db.ts";
-import { marketPrice, referenceFor } from "./price.ts";
+import { referenceFor } from "./price.ts";
 import { catalog } from "./rails.ts";
 import { listings } from "./schema.ts";
 import type { Pricing, Rail, Verifiability } from "./types";
@@ -50,7 +50,7 @@ export async function asks(model: string | null): Promise<Ask[]> {
     const entry = rail?.models.find((candidate) => candidate.canonical === row.model);
     const ref = referenceFor(row.model, rails);
     if (!rail || !entry || !ref) continue;
-    const price = row.priceMicroPerMtok ?? marketPrice(bestLimit.get(row.model) ?? null, ref.pricing, rail);
+    const price = row.priceMicroPerMtok;
     const tokensLeft = row.capacityTokens - row.usedTokens - row.reservedTokens;
     if (price === null || tokensLeft <= 0n) continue;
     result.push({

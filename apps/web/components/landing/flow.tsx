@@ -11,10 +11,10 @@ const AGENTS = [
 ];
 
 const PROVIDERS = [
-  { name: "Claude Code", logo: "/images/rails/claudecode.svg" },
+  { name: "Claude", logo: "/images/rails/claudecode.svg" },
   { name: "DeepSeek", logo: "/images/rails/deepseek.svg" },
   { name: "Command Code", logo: "/images/rails/commandcode.svg" },
-  { name: "0G AI", logo: "/images/rails/0g.svg" },
+  { name: "NEAR AI", logo: "/images/rails/near.svg" },
 ];
 
 export function Flow({ variant }: { variant: "page" | "canvas" }) {

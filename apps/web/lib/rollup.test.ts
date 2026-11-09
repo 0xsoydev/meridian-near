@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { once } from "node:events";
-import { createServer } from "node:http";
 import test from "node:test";
-import { buildRollups, merkleRoot, type Fill } from "./hcs.ts";
-import { clampIndex, readRollups, recomputeIndex, shouldPost, stepToward, twap } from "./rollup.ts";
+import { buildRollups, clampIndex, merkleRoot, recomputeIndex, shouldPost, stepToward, twap, type Fill } from "./rollup.ts";
 import type { Rollup } from "./types";
 
 const fill = (id: string, model: string, price: bigint, charge: bigint, tokens: bigint): Fill => ({
@@ -126,52 +123,4 @@ test("buildRollups groups by model and commits to the rows", () => {
   assert.equal(glm?.usage_root, createHash("sha256").update(Buffer.concat([a, b])).digest("hex"));
   assert.equal(merkleRoot(fills.slice(2)), leaf(fills[2] as Fill).toString("hex"));
   assert.ok(Buffer.byteLength(JSON.stringify(glm)) < 1024);
-});
-
-test("readRollups pages the mirror, keeps only the treasury's valid rollups, first per minute", async () => {
-  const encode = (value: unknown) => Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64");
-  const msg = (seq: number, payer: string, body: unknown) => ({
-    consensus_timestamp: `${seq}.0`,
-    message: encode(body),
-    sequence_number: seq,
-    payer_account_id: payer,
-  });
-  const pages: Record<string, unknown> = {
-    first: {
-      messages: [
-        msg(1, "0.0.1", rollup("glm-5.3", 100, "4000000")),
-        msg(2, "0.0.666", rollup("glm-5.3", 101, "1")),
-        msg(3, "0.0.1", "not json"),
-      ],
-      links: { next: "/api/v1/topics/0.0.9/messages?page=2" },
-    },
-    second: {
-      messages: [
-        msg(4, "0.0.1", rollup("glm-5.3", 100, "9999999")),
-        msg(5, "0.0.1", rollup("glm-5.3", 99, "4000000")),
-        msg(6, "0.0.1", rollup("glm-5.3", 102, "5000000")),
-      ],
-      links: { next: null },
-    },
-  };
-  const server = createServer((request, response) => {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify(request.url?.includes("page=2") ? pages.second : pages.first));
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  try {
-    const result = await readRollups({ mirrorUrl: `http://127.0.0.1:${port}`, topicId: "0.0.9", payer: "0.0.1", sinceMinute: 100 });
-    assert.deepEqual(
-      result.map((r) => [r.seq, r.rollup.minute, r.rollup.vwap_micro_per_mtok]),
-      [
-        [1, 100, "4000000"],
-        [6, 102, "5000000"],
-      ],
-    );
-  } finally {
-    server.close();
-  }
 });

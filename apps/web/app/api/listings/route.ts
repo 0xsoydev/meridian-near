@@ -1,17 +1,17 @@
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+import { ensureAccount } from "../../../lib/accounts.ts";
 import { expectedHost, verifySigned } from "../../../lib/auth.ts";
 import { matchBids } from "../../../lib/bids.ts";
 import { db } from "../../../lib/db.ts";
 import { fail } from "../../../lib/errors.ts";
 import { listingPriceError, parseCapacityMtok } from "../../../lib/listings.ts";
 import { catalog } from "../../../lib/rails.ts";
-import { listings, sellers } from "../../../lib/schema.ts";
+import { accounts, listings } from "../../../lib/schema.ts";
 import { open, seal } from "../../../lib/secrets.ts";
 import type { Rail, SellerListings } from "../../../lib/types";
 
 const railIds = [
-  "0g",
   "stub",
   "anthropic",
   "openai",
@@ -19,8 +19,7 @@ const railIds = [
   "commandcode",
   "zen",
   "opencode-go",
-  "claude-code",
-  "codex",
+  "near-ai",
 ] as const;
 
 const intentSchema = z
@@ -31,7 +30,7 @@ const intentSchema = z
     rail: z.enum(railIds),
     model: z.string().min(1).max(200),
     capacity_mtok: z.string().regex(/^\d{1,18}$/),
-    price_micro_per_mtok: z.string().regex(/^\d{1,18}$/).nullable(),
+    price_micro_per_mtok: z.string().regex(/^\d{1,18}$/),
     client_nonce: z.string().min(8).max(128),
   })
   .strict();
@@ -42,7 +41,6 @@ const bodySchema = z
     credential: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("key"), key: z.string().min(1).max(4096) }).strict(),
       z.object({ kind: z.literal("stored"), listing_id: z.uuid() }).strict(),
-      z.object({ kind: z.literal("oauth") }).strict(),
     ]),
   })
   .strict();
@@ -62,15 +60,14 @@ async function probeKey(rail: Rail, upstream: string, key: string): Promise<Prob
     ...rail.extraHeaders,
   };
   try {
-    if (rail.check === "probe") {
-      const response = await fetch(`${rail.baseUrl}/chat/completions`, {
+    if (rail.check === "check") {
+      const response = await fetch(`${rail.baseUrl}/check_api_key`, {
         method: "POST",
-        headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify({ model: "__probe__", messages: [{ role: "user", content: "." }], max_tokens: 1 }),
+        headers,
         signal: AbortSignal.timeout(15_000),
       });
-      if (response.status === 404) return { ok: true };
-      return { ok: false, status: authStatus(response.status), message: `${rail.id} probe did not answer model_not_found` };
+      if (response.ok) return { ok: true };
+      return { ok: false, status: authStatus(response.status), message: `credential check answered ${response.status}` };
     }
 
     if (rail.check === "key") {
@@ -107,11 +104,11 @@ async function probeKey(rail: Rail, upstream: string, key: string): Promise<Prob
 
 async function storedKey(listingId: string, sellerId: string, railId: string): Promise<string | null> {
   const [source] = await db()
-    .select({ rail: listings.rail, authKind: listings.authKind, sealed: listings.credentialCiphertext })
+    .select({ rail: listings.rail, sealed: listings.credentialCiphertext })
     .from(listings)
     .where(and(eq(listings.id, listingId), eq(listings.sellerId, sellerId)))
     .limit(1);
-  if (!source || source.rail !== railId || source.authKind !== "key") return null;
+  if (!source || source.rail !== railId) return null;
   try {
     return open(source.sealed);
   } catch {
@@ -121,10 +118,10 @@ async function storedKey(listingId: string, sellerId: string, railId: string): P
 
 export async function GET(request: Request): Promise<Response> {
   const address = (new URL(request.url).searchParams.get("seller") ?? "").toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(address)) return fail(400, "invalid_request", "seller must be a wallet address");
+  if (!/^[a-z0-9._-]{2,64}$/.test(address)) return fail(400, "invalid_request", "seller must be a NEAR account id");
 
-  const [seller] = await db().select({ id: sellers.id }).from(sellers).where(eq(sellers.address, address)).limit(1);
-  const rows = seller
+  const [account] = await db().select({ id: accounts.id }).from(accounts).where(eq(accounts.address, address)).limit(1);
+  const rows = account
     ? await db()
         .select({
           id: listings.id,
@@ -137,18 +134,17 @@ export async function GET(request: Request): Promise<Response> {
           status: listings.status,
         })
         .from(listings)
-        .where(eq(listings.sellerId, seller.id))
+        .where(eq(listings.sellerId, account.id))
         .orderBy(desc(listings.createdAt))
         .limit(200)
     : [];
 
   const result: SellerListings = {
-    verified: seller !== undefined,
     listings: rows.map((row) => ({
       listing_id: row.id,
       rail: row.rail,
       model: row.model,
-      price_micro_per_mtok: row.price === null ? null : row.price.toString(),
+      price_micro_per_mtok: row.price.toString(),
       capacity_tokens: row.capacity.toString(),
       used_tokens: row.used.toString(),
       reserved_tokens: row.reserved.toString(),
@@ -163,17 +159,13 @@ export async function POST(request: Request): Promise<Response> {
   if (!parsed.success) return fail(400, "invalid_request", "invalid listing request");
 
   const verified = await verifySigned(parsed.data.signed, expectedHost(request), "list");
-  if (!verified) return fail(401, "invalid_api_key", "invalid wallet signature");
+  if (!verified) return fail(401, "invalid_api_key", "invalid NEAR signature");
 
   const intent = intentSchema.safeParse(verified.intent);
   if (!intent.success) return fail(400, "invalid_request", "invalid listing intent");
+  if (intent.data.rail === "near-ai") return fail(400, "invalid_request", "the house rail is not for sale");
 
-  const [seller] = await db()
-    .select({ id: sellers.id })
-    .from(sellers)
-    .where(eq(sellers.address, verified.address))
-    .limit(1);
-  if (!seller) return fail(403, "invalid_request", "this wallet is not a verified seller yet; verify it once with World ID on /sell");
+  const seller = await ensureAccount(verified.account);
 
   const rails = await catalog();
   const rail = rails.find((entry) => entry.id === intent.data.rail);
@@ -182,22 +174,14 @@ export async function POST(request: Request): Promise<Response> {
   const model = rail.models.find((entry) => entry.canonical === intent.data.model);
   if (!model) return fail(404, "model_not_found", "unknown model for this rail");
 
-  const price =
-    intent.data.price_micro_per_mtok === null ? null : BigInt(intent.data.price_micro_per_mtok);
-  const priceError = listingPriceError(
-    price,
-    { prompt: model.listPrompt, completion: model.listCompletion },
-    rail.resetPeriod,
-  );
+  const price = BigInt(intent.data.price_micro_per_mtok);
+  const priceError = listingPriceError(price, { prompt: model.listPrompt, completion: model.listCompletion });
   if (priceError) return fail(400, "invalid_request", priceError);
 
   const capacityTokens = parseCapacityMtok(intent.data.capacity_mtok);
   if (capacityTokens === null) return fail(400, "invalid_request", "invalid capacity");
 
   const credential = parsed.data.credential;
-  if (credential.kind === "oauth") return fail(400, "invalid_request", "oauth rails are disabled");
-  if (rail.auth !== "key") return fail(400, "invalid_request", "rail does not accept api keys");
-
   const key = credential.kind === "key" ? credential.key : await storedKey(credential.listing_id, seller.id, rail.id);
   if (key === null) return fail(404, "invalid_request", `no stored ${rail.id} key on that listing`);
 
@@ -217,7 +201,6 @@ export async function POST(request: Request): Promise<Response> {
       sellerId: seller.id,
       rail: rail.id,
       model: model.canonical,
-      authKind: "key",
       credentialCiphertext: seal(key),
       priceMicroPerMtok: price,
       capacityTokens,
@@ -234,7 +217,7 @@ export async function POST(request: Request): Promise<Response> {
     listing_id: created.id,
     rail: rail.id,
     model: model.canonical,
-    price_micro_per_mtok: price === null ? null : price.toString(),
+    price_micro_per_mtok: price.toString(),
     capacity_tokens: capacityTokens.toString(),
     status: "active",
   });

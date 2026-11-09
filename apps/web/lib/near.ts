@@ -49,6 +49,14 @@ export function opsKey(): KeyPairString {
   return required("NEAR_WEB_KEY") as KeyPairString;
 }
 
+export function keeperId(): string {
+  return required("NEAR_OPS_ID");
+}
+
+export function keeperKey(): KeyPairString {
+  return required("NEAR_KEEPER_KEY") as KeyPairString;
+}
+
 export async function view<T>(method: string, args: Record<string, unknown> = {}, contractId = coreId()): Promise<T> {
   return (await nearProvider().callFunction({ contractId, method, args })) as T;
 }

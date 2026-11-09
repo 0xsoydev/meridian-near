@@ -1,7 +1,6 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { asks } from "./book.ts";
 import { db } from "./db.ts";
-import { nextUtcMidnight } from "./ledger.ts";
 import { charge } from "./price.ts";
 import { bids } from "./schema.ts";
 import type { Bid } from "./types";
@@ -36,7 +35,6 @@ async function fillBid(input: {
   model: string;
   take: bigint;
   takeBps: bigint;
-  expiresAt: Date | null;
 }): Promise<boolean> {
   const result = await db().execute<{ filled: number }>(sql`
     with b as (
@@ -72,8 +70,8 @@ async function fillBid(input: {
       from li, b
       returning id
     ), p as (
-      insert into prepaid (key_id, listing_id, model, tokens_remaining, expires_at)
-      select b.key_id, li.id, ${input.model}, ${input.take}, ${input.expiresAt ? input.expiresAt.toISOString() : null}
+      insert into prepaid (key_id, listing_id, model, tokens_remaining)
+      select b.key_id, li.id, ${input.model}, ${input.take}
       from li, b
       returning id
     )
@@ -100,7 +98,6 @@ export async function matchBids(model: string): Promise<number> {
       model,
       take: bid.tokens < ask.tokensLeft ? bid.tokens : ask.tokensLeft,
       takeBps,
-      expiresAt: ask.rail.resetPeriod === "daily" ? nextUtcMidnight(new Date()) : null,
     });
     if (!matched) return filled;
     filled += 1;

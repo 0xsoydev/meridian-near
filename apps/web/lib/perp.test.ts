@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { liquidatable, liquidationPrice, marketId, notional, openMargin, orderPlan, positionAfter, tradeFee } from "./perp.ts";
+import { liquidatable, liquidationPrice, notional, openMargin, orderPlan, positionAfter, tradeFee } from "./perp.ts";
 
 test("the position an order leaves matches what PerpMarket books", () => {
   const price = 150_000n;
@@ -46,9 +46,6 @@ test("an order opens, adds, reduces and closes in one leg, and flips as close th
   assert.deepEqual(legs(7n, 0n), []);
 });
 
-test("marketId matches keccak256(bytes(model)) in Solidity", () => {
-  assert.equal(marketId("glm-5.3"), "0x1125a5e4cc6d2592878c0498f3e69b293bc43718b5b92377c10c1f3defb7d1ba");
-});
 
 test("notional matches PerpMarket's abs(size) · price / 1e6", () => {
   assert.equal(notional(1_000_000n, 3_400_000n), 3_400_000n);

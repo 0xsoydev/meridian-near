@@ -1,6 +1,7 @@
-import { createKey, ensureAccount, listKeys, revokeKey } from "../../../../lib/accounts.ts";
-import { expectedHost, routerKey, verifySigned } from "../../../../lib/auth.ts";
+import { createKey, ensureAccount, listKeys } from "../../../../lib/accounts.ts";
+import { expectedHost, verifySigned } from "../../../../lib/auth.ts";
 import { fail } from "../../../../lib/errors.ts";
+import { capOf } from "../../../../lib/pay.ts";
 import type { CreateKeyResult } from "../../../../lib/types";
 
 export async function POST(request: Request): Promise<Response> {
@@ -27,14 +28,22 @@ export async function GET(request: Request): Promise<Response> {
   );
   if (!signed) return fail(401, "invalid_api_key", "a fresh NEAR signature is required");
   const account = await ensureAccount(signed.account);
-  return Response.json({ keys: await listKeys(account.id) });
-}
-
-export async function DELETE(request: Request): Promise<Response> {
-  const key = await routerKey(request);
-  if (!key) return fail(401, "invalid_api_key", "invalid router key");
-  if (!(await revokeKey(key.id))) {
-    return fail(409, "invalid_request", "this key still holds a float, bids, MTokens or offers; spend or cancel them first");
-  }
-  return new Response(null, { status: 204 });
+  const listed = await listKeys(account.id);
+  const keys = await Promise.all(
+    listed.map(async (key) => {
+      if (!key.cap_key) return key;
+      const cap = await capOf(signed.account, key.cap_key).catch(() => null);
+      return cap
+        ? {
+            ...key,
+            cap: {
+              per_day_usd_micro: cap.per_day,
+              used_today_usd_micro: cap.used_today,
+              left_usd_micro: cap.left,
+            },
+          }
+        : key;
+    }),
+  );
+  return Response.json({ keys });
 }

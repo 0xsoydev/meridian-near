@@ -21,6 +21,7 @@ export async function GET(request: Request): Promise<Response> {
       charge: usage.chargeUsdMicro,
       prepaidId: usage.prepaidId,
       requestId: usage.upstreamRequestId,
+      proof: usage.proof,
     })
     .from(usage)
     .innerJoin(listings, eq(listings.id, usage.listingId))
@@ -37,8 +38,9 @@ export async function GET(request: Request): Promise<Response> {
     completion_tokens: row.completion,
     mixed_tokens: row.mixed.toString(),
     charge_usd_micro: row.charge.toString(),
-    paid_from: row.prepaidId ? "prepaid" : "balance",
+    paid_from: row.prepaidId ? "prepaid" : "float",
     upstream_request_id: row.requestId,
+    proof: row.proof !== null,
   }));
   return Response.json({ data });
 }

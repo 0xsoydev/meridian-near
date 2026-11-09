@@ -3,11 +3,11 @@ import { routerKey } from "../../../../lib/auth.ts";
 import { restBid } from "../../../../lib/bids.ts";
 import { asks, type Ask } from "../../../../lib/book.ts";
 import { fail } from "../../../../lib/errors.ts";
-import { fill, nextUtcMidnight, prepaidHolding } from "../../../../lib/ledger.ts";
+import { fill, prepaidHolding } from "../../../../lib/ledger.ts";
 import { buyOffer, offerAsks, type OfferAsk } from "../../../../lib/offers.ts";
+import { topUp } from "../../../../lib/pay.ts";
 import { charge, formatMicroPerMtok, listCeiling, sellerEarning } from "../../../../lib/price.ts";
 import { catalog, reference } from "../../../../lib/rails.ts";
-import { applyPayment, paymentDue } from "../../../../lib/x402.ts";
 import type { Trade, TradeResult } from "../../../../lib/types";
 
 const MAX_TRADE_TOKENS = 1_000_000_000n;
@@ -42,9 +42,7 @@ export async function POST(request: Request): Promise<Response> {
     return fail(400, "invalid_request", `the limit is above the ${formatMicroPerMtok(ceiling)} USD/MTok list price, and no ask can sit above it`);
   }
 
-  const payment = await applyPayment(request, key);
-  if ("error" in payment) return payment.error;
-  const headers: Record<string, string> = payment.header ? { "PAYMENT-RESPONSE": payment.header } : {};
+  const headers: Record<string, string> = {};
 
   const [listed, resold] = await Promise.all([asks(model), offerAsks(model, key.id)]);
   const sources: Source[] = [
@@ -65,11 +63,13 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (steps.length === 0 && limit === null) return fail(404, "no_liquidity", `no asks for ${model}`);
 
-  const due = await paymentDue(request, key.id, quote + (limit === null ? 0n : charge(left, limit)));
-  if (due) return due;
+  const needed = quote + (limit === null ? 0n : charge(left, limit));
+  if (key.balanceUsdMicro < needed) {
+    const topped = await topUp(key, needed);
+    if ("blocked" in topped) return topped.blocked;
+  }
 
   const takeBps = BigInt(process.env.TAKE_BPS ?? "1000");
-  const now = new Date();
   const fills: Trade[] = [];
   let filled = 0n;
   for (const { source, take, cost } of steps) {
@@ -83,7 +83,6 @@ export async function POST(request: Request): Promise<Response> {
             price: source.price,
             chargeMicro: cost,
             sellerEarningMicro: sellerEarning(cost, takeBps),
-            expiresAt: source.ask.rail.resetPeriod === "daily" ? nextUtcMidnight(now) : null,
           })
         : await buyOffer({ offerId: source.offer.offerId, buyerKeyId: key.id, take, takeBps }).then((bought) => ({
             listingOk: bought.offerOk,

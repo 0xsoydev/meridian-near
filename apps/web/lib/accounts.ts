@@ -67,7 +67,7 @@ export async function revokeKey(id: string): Promise<boolean> {
 
 export async function listKeys(accountId: string): Promise<KeySummary[]> {
   const rows = await db()
-    .select({ id: keys.id, name: keys.name, float: keys.balanceUsdMicro, createdAt: keys.createdAt })
+    .select({ id: keys.id, name: keys.name, float: keys.balanceUsdMicro, capKey: keys.capKey, createdAt: keys.createdAt })
     .from(keys)
     .where(eq(keys.accountId, accountId))
     .orderBy(desc(keys.createdAt));
@@ -75,6 +75,8 @@ export async function listKeys(accountId: string): Promise<KeySummary[]> {
     key_id: row.id,
     name: row.name ?? "key",
     float_usd_micro: row.float.toString(),
+    cap_key: row.capKey,
+    cap: null,
     created_at: row.createdAt.toISOString(),
   }));
 }

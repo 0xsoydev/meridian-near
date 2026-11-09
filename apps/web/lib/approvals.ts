@@ -114,3 +114,22 @@ export async function denyDevice(code: string): Promise<boolean> {
     .returning({ id: approvals.id });
   return rows.length > 0;
 }
+
+export async function approvalByCode(
+  code: string,
+): Promise<{ key_id: string; name: string; cap_usd_micro: string | null } | null> {
+  const [row] = await db()
+    .select({ keyId: approvals.keyId, cap: approvals.capUsdMicro, name: keys.name })
+    .from(approvals)
+    .innerJoin(keys, eq(keys.id, approvals.keyId))
+    .where(
+      and(
+        eq(approvals.userCode, code),
+        eq(approvals.status, "pending"),
+        gt(approvals.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  return { key_id: row.keyId, name: row.name ?? "agent", cap_usd_micro: row.cap?.toString() ?? null };
+}
