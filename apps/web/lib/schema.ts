@@ -72,23 +72,6 @@ export const listings = pgTable(
   ],
 );
 
-export const topups = pgTable(
-  "topups",
-  {
-    txHash: text("tx_hash").primaryKey(),
-    keyId: uuid("key_id")
-      .notNull()
-      .references(() => keys.id),
-    amountUsdMicro: bigint("amount_usd_micro", { mode: "bigint" }).notNull(),
-    status: text("status").notNull(),
-    createdAt: createdAt(),
-  },
-  (t) => [
-    check("topups_status", sql`${t.status} in ('pending','done','failed')`),
-    index("topups_key_created_idx").on(t.keyId, t.createdAt),
-  ],
-);
-
 export const payouts = pgTable(
   "payouts",
   {
@@ -285,4 +268,3 @@ export type TradeRow = typeof trades.$inferSelect;
 export type PrepaidRow = typeof prepaid.$inferSelect;
 export type PayoutRow = typeof payouts.$inferSelect;
 export type ApprovalRow = typeof approvals.$inferSelect;
-export type TopupRow = typeof topups.$inferSelect;

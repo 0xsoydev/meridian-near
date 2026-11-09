@@ -41,6 +41,14 @@ export function ownerId(): string {
   return required("NEAR_OWNER_ID");
 }
 
+export function opsId(): string {
+  return required("NEAR_OPS_ID");
+}
+
+export function opsKey(): string {
+  return required("NEAR_WEB_KEY");
+}
+
 export async function view<T>(method: string, args: Record<string, unknown> = {}, contractId = coreId()): Promise<T> {
   return (await nearProvider().callFunction({ contractId, method, args })) as T;
 }
