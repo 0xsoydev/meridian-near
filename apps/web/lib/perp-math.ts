@@ -40,6 +40,13 @@ export function openMargin(sizeDelta: bigint, price: bigint, maxLeverage: bigint
   return value / maxLeverage + value / 100n + tradeFee(sizeDelta, price) + 1n;
 }
 
+export function maxOpen(wallet: bigint, price: bigint, leverage: bigint): bigint {
+  if (price <= 0n || leverage <= 0n || wallet <= 2n) return 0n;
+  let size = ((wallet - 2n) * 1_000_000_000n * leverage) / (price * (1_000n + 11n * leverage));
+  while (size > 0n && openMargin(size, price, leverage) > wallet) size -= size / 1_000n + 1n;
+  return size;
+}
+
 export function positionAfter(
   current: PositionMath | null,
   legs: ReadonlyArray<{ sizeDelta: bigint; margin: bigint }>,

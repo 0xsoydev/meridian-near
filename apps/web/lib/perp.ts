@@ -1,3 +1,4 @@
+import { MARKETS } from "./markets.ts";
 import { view } from "./near.ts";
 import { liquidationPrice, type PositionMath } from "./perp-math.ts";
 import type { PerpAccount } from "./types";
@@ -5,6 +6,7 @@ import type { PerpAccount } from "./types";
 export {
   liquidatable,
   liquidationPrice,
+  maxOpen,
   notional,
   openMargin,
   orderPlan,
@@ -13,7 +15,7 @@ export {
 } from "./perp-math.ts";
 export type { PositionMath } from "./perp-math.ts";
 
-export const MARKETS = ["glm-5.3-flash", "glm-5.3", "deepseek-v4.1-flash"] as const;
+export { MARKETS };
 
 type MarketView = {
   listed: boolean;
