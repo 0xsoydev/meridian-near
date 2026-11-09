@@ -14,19 +14,15 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "LLM Token Exchange",
-  description: "Spot and perps marketplace for LLM inference",
+  title: "Meridian",
+  description:
+    "A market for spare LLM capacity on NEAR: spot MTokens, perps on the index, and agents that pay inside an on-chain daily limit.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html
-      lang="en"
-      className={`${instrumentSans.variable} ${instrumentSerif.variable}`}
-    >
-      <body className="min-h-screen bg-zinc-950 font-sans text-zinc-100 antialiased">
-        {children}
-      </body>
+    <html lang="en" className={`${instrumentSans.variable} ${instrumentSerif.variable}`}>
+      <body className="min-h-screen bg-white font-sans text-ink antialiased">{children}</body>
     </html>
   );
 }

@@ -185,6 +185,10 @@ export function fillsToPoints(fills: BookFill[], sinceMs = Number.NEGATIVE_INFIN
     }));
 }
 
+export function postsToPoints(posts: ReadonlyArray<{ price_micro_per_mtok: string; at: number }>): ChartPoint[] {
+  return posts.map((post) => ({ time: post.at as UTCTimestamp, value: Number(post.price_micro_per_mtok) / 1e6, volume: 0 }));
+}
+
 export function candlesFromPoints(points: ChartPoint[], bucket: number): CandlePoint[] {
   const candles: CandlePoint[] = [];
   for (const point of points) {

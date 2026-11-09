@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { liquidatable, liquidationPrice, notional, openMargin, orderPlan, positionAfter, tradeFee } from "./perp.ts";
+import { liquidatable, liquidationPrice, maxOpen, notional, openMargin, orderPlan, positionAfter, tradeFee } from "./perp.ts";
 
 test("the position an order leaves matches what PerpMarket books", () => {
   const price = 150_000n;
@@ -57,6 +57,21 @@ test("openMargin clears PerpMarket's initial margin after the fee", () => {
   assert.ok((322_831n - 1_530n) * 5n >= notional(10_000_000n, 153_000n));
   assert.equal(openMargin(-10_000_000n, 153_000n, 5n), 322_831n);
   assert.equal(openMargin(1n, 1n, 5n), 2n);
+});
+
+test("maxOpen is the largest size whose opening margin the wallet covers", () => {
+  for (const [wallet, price, leverage] of [
+    [2_661_641n, 180_000n, 5n],
+    [10_000_000n, 153_000n, 1n],
+    [500_000n, 3_400_000n, 3n],
+  ] as const) {
+    const size = maxOpen(wallet, price, leverage);
+    assert.ok(size > 0n);
+    assert.ok(openMargin(size, price, leverage) <= wallet);
+    assert.ok(openMargin(size + size / 500n + 1n, price, leverage) > wallet);
+  }
+  assert.equal(maxOpen(2n, 180_000n, 5n), 0n);
+  assert.equal(maxOpen(1_000_000n, 0n, 5n), 0n);
 });
 
 test("long liquidation price matches test_LiquidationBoundaryAndReward", () => {

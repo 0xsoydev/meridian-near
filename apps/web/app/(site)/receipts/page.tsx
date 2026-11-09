@@ -1,18 +1,22 @@
 import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { Empty, LINK, PAGE, PageHeader, Panel, ROW, Stat, TD, Table } from "../../../components/kit";
+import { ago, explorer, usd } from "../../../lib/client";
 import { db } from "../../../lib/db";
 import { MARKETS, readMarket } from "../../../lib/perp";
-import { formatMicroPerMtok, formatMtok } from "../../../lib/price";
-import { attestedSigner, proofValid, type Proof } from "../../../lib/proof";
+import { blended, clockFormat, formatMtok, referenceFor } from "../../../lib/price";
+import { attestedSigner, proofValid, readProof } from "../../../lib/proof";
+import { catalog } from "../../../lib/rails";
 import { readRollups } from "../../../lib/rollup";
-import { listings, usage } from "../../../lib/schema";
+import { accounts, listings, payouts, usage } from "../../../lib/schema";
+import { Recompute } from "./recompute";
 
 export const dynamic = "force-dynamic";
 
 const NEARAI = process.env.NEARAI_BASE_URL ?? "https://cloud-api.near.ai/v1";
+const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "core";
+const WINDOW = Number(process.env.INDEX_WINDOW_MIN ?? "60");
 
-type ProofRow = { at: Date; raw: string | null; model: string };
-
-async function recentProofs(): Promise<ProofRow[]> {
+async function recentProofs() {
   try {
     return await db()
       .select({ at: usage.createdAt, raw: usage.proof, model: listings.model })
@@ -26,18 +30,26 @@ async function recentProofs(): Promise<ProofRow[]> {
   }
 }
 
-function parse(raw: string | null): Proof | null {
-  if (!raw) return null;
+async function recentPayouts() {
   try {
-    return JSON.parse(raw) as Proof;
+    return await db()
+      .select({ day: payouts.day, amount: payouts.amountUsdMicro, status: payouts.status, tx: payouts.txHash, seller: accounts.address })
+      .from(payouts)
+      .innerJoin(accounts, eq(accounts.id, payouts.accountId))
+      .orderBy(desc(payouts.createdAt))
+      .limit(10);
   } catch {
-    return null;
+    return [];
   }
 }
 
+const minute = (value: number) => new Date(value * 60_000).toISOString().slice(11, 16);
+const short = (value: string) => (value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value);
+
 export default async function ReceiptsPage() {
+  const now = Math.floor(Date.now() / 1000);
   const since = Math.floor(Date.now() / 60_000) - 120;
-  const [markets, proofs, signer] = await Promise.all([
+  const [markets, proofs, paid, signer, rails] = await Promise.all([
     Promise.all(
       MARKETS.map(async (model) => ({
         model,
@@ -46,73 +58,126 @@ export default async function ReceiptsPage() {
       })),
     ),
     recentProofs(),
+    recentPayouts(),
     attestedSigner(NEARAI).catch(() => null),
+    catalog().catch(() => []),
   ]);
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-12">
-      <header>
-        <h1 className="text-3xl font-semibold">Receipts</h1>
-        <p className="text-[#555]">Read straight from core. Anyone can recompute the index from these rows.</p>
-      </header>
+    <div className={PAGE}>
+      <PageHeader title="Receipts">
+        Fill rollups and index posts are read from{" "}
+        <a href={explorer("address", CORE)} target="_blank" rel="noreferrer" className={LINK}>
+          {CORE}
+        </a>
+        . Recompute the index in your own browser, and follow every payout to its transaction.
+      </PageHeader>
 
-      {markets.map((row) => (
-        <section key={row.model} className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-xl font-semibold">{row.model}</h2>
-            <p className="text-sm tabular-nums text-[#555]">
-              index {row.market && row.market.updatedAt > 0n ? formatMicroPerMtok(row.market.price) : "no post yet"}
-            </p>
-          </div>
-          {row.rollups.length === 0 && <p className="text-sm text-[#777]">No rollups in the last two hours.</p>}
-          {row.rollups.length > 0 && (
-            <table className="w-full text-left text-sm tabular-nums">
-              <thead className="text-[#777]">
-                <tr>
-                  <th className="py-1 font-normal">minute</th>
-                  <th className="py-1 font-normal">fills</th>
-                  <th className="py-1 font-normal">MTok</th>
-                  <th className="py-1 font-normal">VWAP</th>
-                  <th className="py-1 font-normal">root</th>
-                </tr>
-              </thead>
-              <tbody>
-                {row.rollups
-                  .slice()
-                  .reverse()
-                  .map((rollup) => (
-                    <tr key={rollup.minute} className="border-t border-[#EEEEEE]">
-                      <td className="py-1">{new Date(rollup.minute * 60_000).toISOString().slice(11, 16)}</td>
-                      <td className="py-1">{rollup.fills}</td>
-                      <td className="py-1">{formatMtok(BigInt(rollup.mixed_tokens))}</td>
-                      <td className="py-1">{formatMicroPerMtok(BigInt(rollup.vwap_micro_per_mtok))}</td>
-                      <td className="py-1 font-mono text-xs text-[#777]">{rollup.usage_root.slice(0, 16)}…</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-      ))}
+      {markets.map(({ model, market, rollups }) => {
+        const posted = market && market.updatedAt > 0n ? market : null;
+        const reference = referenceFor(model, rails);
+        const fills = rollups.reduce((total, rollup) => total + rollup.fills, 0);
+        const volume = rollups.reduce((total, rollup) => total + BigInt(rollup.mixed_tokens), 0n);
+        return (
+          <Panel key={model} title={model} bodyClassName="flex flex-col gap-6 pt-5">
+            <dl className="flex flex-wrap gap-x-10 gap-y-4">
+              <Stat label="Index">{posted ? usd(posted.price) : "Not posted"}</Stat>
+              <Stat label="Posted">{posted ? ago(now - Number(posted.updatedAt)) : "Never"}</Stat>
+              <Stat label="Rollups, 2 h">{rollups.length}</Stat>
+              <Stat label="Fills, 2 h">{fills}</Stat>
+              <Stat label="Volume, 2 h">{formatMtok(volume)} MTok</Stat>
+              <Stat label="Allowed band">
+                {reference ? `${usd(blended(reference.pricing) / 10n)} to ${usd(blended(reference.pricing))}` : "No list price"}
+              </Stat>
+            </dl>
+            {reference ? <Recompute model={model} reference={blended(reference.pricing).toString()} window={WINDOW} /> : null}
+            {rollups.length === 0 ? (
+              <Empty start>No rollups in the last two hours. One is written for every minute with fills.</Empty>
+            ) : (
+              <Table
+                minWidth={720}
+                columns={[
+                  { label: "Minute (UTC)" },
+                  { label: "Fills", end: true },
+                  { label: "MTok", end: true },
+                  { label: "VWAP", end: true },
+                  { label: "Charged", end: true },
+                  { label: "Usage root" },
+                ]}
+              >
+                {rollups.toReversed().map((rollup) => (
+                  <tr key={rollup.minute} className={ROW}>
+                    <td className={TD}>{minute(rollup.minute)}</td>
+                    <td className={`${TD} text-right`}>{rollup.fills}</td>
+                    <td className={`${TD} text-right`}>{formatMtok(BigInt(rollup.mixed_tokens))}</td>
+                    <td className={`${TD} text-right`}>{usd(BigInt(rollup.vwap_micro_per_mtok))}</td>
+                    <td className={`${TD} text-right`}>{usd(BigInt(rollup.charge_usd_micro))}</td>
+                    <td className={`${TD} font-mono text-[12px] text-muted`} title={rollup.usage_root}>
+                      {short(rollup.usage_root)}
+                    </td>
+                  </tr>
+                ))}
+              </Table>
+            )}
+          </Panel>
+        );
+      })}
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-xl font-semibold">NEAR AI proofs</h2>
-        <p className="text-sm text-[#555]">
-          {signer ? `attested gateway signer ${signer.slice(0, 20)}…` : "attestation report unavailable"}
+      <Panel title="NEAR AI proofs" bodyClassName="flex flex-col gap-4 pt-5">
+        <p className="max-w-[68ch] text-[13px] leading-[20px] text-ink">
+          {signer
+            ? `Responses served through NEAR AI are signed inside a TEE. The attested gateway signer is ${short(signer)}.`
+            : "The NEAR AI attestation report is unavailable right now, so signers can't be matched to it."}{" "}
+          <a href="https://cloud.near.ai/verify" target="_blank" rel="noreferrer" className={LINK}>
+            Verify TDX and NVIDIA quotes
+          </a>
         </p>
-        {proofs.length === 0 && <p className="text-sm text-[#777]">No signed responses yet.</p>}
-        {proofs.map((row) => {
-          const proof = parse(row.raw);
-          const valid = proof ? proofValid(proof) : false;
-          return (
-            <p key={row.at.toISOString()} className="text-sm tabular-nums text-[#555]">
-              {row.at.toISOString().slice(11, 19)} · {row.model} · {proof?.signature_kind ?? "?"} ·{" "}
-              {valid ? "signature verified" : "not verified"} · {proof?.signing_address.slice(0, 16) ?? "—"}…
-            </p>
-          );
-        })}
-        <p className="text-xs text-[#777]">Full TDX and NVIDIA verification: cloud.near.ai/verify.</p>
-      </section>
-    </main>
+        {proofs.length === 0 ? (
+          <Empty start>No signed responses yet. They appear after the first request served by NEAR AI.</Empty>
+        ) : (
+          <Table columns={[{ label: "Time (UTC)" }, { label: "Model" }, { label: "Kind" }, { label: "Signature" }, { label: "Signer" }]}>
+            {proofs.map((row) => {
+              const proof = readProof(row.raw);
+              const valid = proof ? proofValid(proof) : false;
+              return (
+                <tr key={row.at.toISOString()} className={ROW}>
+                  <td className={TD}>{clockFormat.format(row.at)}</td>
+                  <td className={TD}>{row.model}</td>
+                  <td className={TD}>{proof?.signature_kind ?? "Unknown"}</td>
+                  <td className={`${TD} ${valid ? "text-up" : "text-down"}`}>{valid ? "Verified" : "Not verified"}</td>
+                  <td className={`${TD} font-mono text-[12px] text-muted`}>{proof ? short(proof.signing_address) : "None"}</td>
+                </tr>
+              );
+            })}
+          </Table>
+        )}
+      </Panel>
+
+      <Panel title="Payouts" bodyClassName="flex flex-col gap-4 pt-5">
+        {paid.length === 0 ? (
+          <Empty start>No payouts yet. Sellers are paid once a day for the day before.</Empty>
+        ) : (
+          <Table columns={[{ label: "Day" }, { label: "Seller" }, { label: "Amount", end: true }, { label: "Status" }, { label: "Transaction" }]}>
+            {paid.map((row) => (
+              <tr key={`${row.day}-${row.seller}-${row.tx ?? "pending"}`} className={ROW}>
+                <td className={TD}>{row.day}</td>
+                <td className={TD}>{row.seller}</td>
+                <td className={`${TD} text-right`}>{usd(row.amount)}</td>
+                <td className={`${TD} ${row.status === "executed" ? "text-up" : "text-muted"}`}>{row.status === "executed" ? "Paid" : "Pending"}</td>
+                <td className={TD}>
+                  {row.tx ? (
+                    <a href={explorer("txns", row.tx)} target="_blank" rel="noreferrer" className={`${LINK} font-mono text-[12px]`}>
+                      {short(row.tx)}
+                    </a>
+                  ) : (
+                    <span className="text-muted">{row.status === "executed" ? "Not recorded" : "Not sent"}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Panel>
+    </div>
   );
 }

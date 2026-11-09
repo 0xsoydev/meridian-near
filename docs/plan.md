@@ -269,7 +269,7 @@ Baseline §10.10, unchanged: buys walk the asks, limit buys rest as bids, the ma
    - with no fills, the best ask; with no ask, post nothing;
    - clamp to `[list/10, list]`, step at most 10 % from the last post;
    - `core.post` when the price moved 0.1 % or 5 minutes have passed.
-3. `/receipts` recomputes the same thing in the browser from the same views (`recomputeIndex` in `lib/rollup.ts`).
+3. `/receipts` recomputes the same thing in the browser from the same views, read over public NEAR RPC (`recomputeIndex` in `lib/index-math.ts`, shared with the keeper through `lib/rollup.ts`).
 
 ### 9.8 Perps (`/perps`)
 
@@ -349,11 +349,11 @@ The agent holds no NEAR key:
 | `/` | markets (model, rails, TEE badge, best ask, index, discount, 24 h volume) and "Use from your terminal" with the one-line `skill.md` command |
 | `/agents` | the terminal guide: `skill.md`, the device flow, demo keys, what an agent can and cannot do |
 | `/a/[code]` | approve an agent or a higher limit: name, limit, wallet, one prompt to fund and approve, or deny |
-| `/keys` | the Meridian wallet (deposit, withdraw, any chain), agents and keys (limit, used, float, raise, revoke), create a key, recent requests |
+| `/keys` | the Meridian wallet (deposit, withdraw, any chain), agents and keys behind one `list_keys` signature reused for four minutes (limit, used, float, raise, revoke), create a key and set its limit, recent requests |
 | `/trade` | baseline §14; a short float refills from the owner's wallet |
 | `/perps` | baseline §14; margin from the Meridian wallet, history from `core` |
 | `/sell` | wallet → provider → key → model → price → capacity → one signature; earnings and payouts |
-| `/receipts` | rollups, index recompute, index posts, NEAR AI proofs, payouts; read from `core` in a server component |
+| `/receipts` | rollups, index posts, NEAR AI proofs and payouts in a server component; the index recompute reads `core` over public NEAR RPC in the browser |
 
 - `providers.tsx` is a client-only context around `@hot-labs/near-connect`, with the network from `NEXT_PUBLIC_NEAR_NETWORK`. It exposes `accountId`, `connect`, `disconnect`, `signMessage` and `signAndSendTransactions`. Nonces come from `crypto.getRandomValues(new Uint8Array(32))`.
 - `public/skill.md` covers:

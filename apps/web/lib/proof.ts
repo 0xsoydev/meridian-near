@@ -39,6 +39,16 @@ function signatureBytes(signature: string): Buffer | null {
   return raw && raw.length === 64 ? raw : null;
 }
 
+export function readProof(raw: string | null): Proof | null {
+  if (!raw) return null;
+  try {
+    const parsed = proofSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 export function proofValid(proof: Proof): boolean {
   if (proof.signing_algo !== undefined && proof.signing_algo !== "ed25519") return false;
   const key = publicKey(proof.signing_address);
