@@ -135,17 +135,6 @@ test("key-scoped rails keep their priced chat models and check the seller's mode
   assert.deepEqual(go?.models.map((model) => model.canonical), ["glm-5.3", "glm-5.3-flash"]);
 });
 
-test("0G is priced from its public model list while requests still go to its router", async () => {
-  const og = (await catalog()).find((entry) => entry.id === "0g");
-  assert.ok(og);
-  assert.equal(og.baseUrl, "http://127.0.0.1:1");
-  assert.equal(og.resetPeriod, "daily");
-  assert.deepEqual(
-    og.models.map((model) => [model.canonical, model.listPrompt, model.listCompletion]),
-    [["0gm-1.0-35b-a3b", 80_000n, 480_000n]],
-  );
-});
-
 test("reference picks the cheapest listed price and misses unknown models", async () => {
   const cheapest = await reference("glm-5.3");
   assert.ok(cheapest);

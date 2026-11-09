@@ -1,4 +1,4 @@
-import type { ApprovalStart, RouterError, RouterErrorCode } from "./types";
+import type { BlockedAction, RouterError, RouterErrorCode } from "./types";
 
 const TYPES: Record<RouterErrorCode, RouterError["error"]["type"]> = {
   invalid_api_key: "authentication_error",
@@ -15,9 +15,9 @@ export function fail(
   code: RouterErrorCode,
   message: string,
   headers: HeadersInit = {},
-  approval?: ApprovalStart,
+  action?: BlockedAction,
 ): Response {
   const body: RouterError = { error: { message, type: TYPES[code], code } };
-  if (approval) body.approval = approval;
+  if (action) body.action = action;
   return Response.json(body, { status, headers });
 }

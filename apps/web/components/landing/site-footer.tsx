@@ -8,14 +8,14 @@ const GROUPS: { title: string; links: { label: string; href?: string }[] }[] = [
     links: [
       { label: "Twitter X" },
       { label: "Telegram" },
-      { label: "HashScan", href: "https://hashscan.io/testnet/topic/0.0.11222352" },
+      { label: "NearBlocks", href: "https://testnet.nearblocks.io" },
     ],
   },
   {
     title: "docs",
     links: [
-      { label: "Plan", href: "https://github.com/0xsoydev/celestial-trade/blob/develop/docs/plan.md" },
-      { label: "README", href: "https://github.com/0xsoydev/celestial-trade" },
+      { label: "Plan", href: "https://github.com/0xsoydev/meridian-near/blob/develop/docs/plan.md" },
+      { label: "README", href: "https://github.com/0xsoydev/meridian-near" },
       { label: "Receipts", href: "/receipts" },
     ],
   },

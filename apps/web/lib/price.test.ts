@@ -9,7 +9,6 @@ import {
   formatMicroPerMtok,
   formatMtok,
   formatUsd,
-  marketPrice,
   mixedTokens,
   parseMtok,
   parseUsd,
@@ -22,9 +21,6 @@ import {
 import type { Pricing, Rail } from "./types.ts";
 
 const glm: Pricing = { prompt: 1_400_000n, completion: 4_400_000n };
-
-const dailyRail = { resetPeriod: "daily" } as Rail;
-const idleRail = { resetPeriod: null } as Rail;
 
 test("MTok inputs and token counts round-trip at the boundary", () => {
   assert.equal(parseMtok("10"), 10_000_000n);
@@ -77,56 +73,41 @@ test("seller earning floors the platform cut", () => {
   assert.equal(sellerEarning(123_457n, 10_000n), 0n);
 });
 
-test("marketPrice falls back only on expiring credits", () => {
-  assert.equal(marketPrice(900_000n, glm, dailyRail), 900_000n);
-  assert.equal(marketPrice(null, glm, dailyRail), 1_935_000n);
-  assert.equal(marketPrice(null, glm, idleRail), null);
-});
-
 test("reference picks the cheapest enabled rail", () => {
   const rails: Rail[] = [
     {
-      id: "0g",
-      protocol: "openai-chat",
+      id: "near-ai",
       baseUrl: "https://example.invalid",
       modelsUrl: "https://example.invalid/models",
-      check: "probe",
-      auth: "key",
+      check: "check",
       extraHeaders: {},
       models: [
-        { canonical: "glm-5.3", upstream: "glm-5.3", listPrompt: 1_400_000n, listCompletion: 4_400_000n, verifiability: "TeeML" },
+        { canonical: "glm-5.3", upstream: "z-ai/glm-5.3", listPrompt: 1_400_000n, listCompletion: 4_400_000n, verifiability: "tee" },
       ],
-      resetPeriod: "daily",
       enabled: true,
     },
     {
       id: "openrouter",
-      protocol: "openai-chat",
       baseUrl: "https://example.invalid",
       modelsUrl: "https://example.invalid/models",
       check: "key",
-      auth: "key",
       extraHeaders: {},
       models: [
         { canonical: "glm-5.3", upstream: "z-ai/glm", listPrompt: 2_000_000n, listCompletion: 6_000_000n, verifiability: null },
       ],
-      resetPeriod: null,
       enabled: true,
     },
     {
       id: "openai",
-      protocol: "openai-chat",
       baseUrl: "https://example.invalid",
       modelsUrl: "https://example.invalid/models",
       check: "models",
-      auth: "key",
       extraHeaders: {},
       models: [{ canonical: "glm-5.3", upstream: "gpt", listPrompt: 1n, listCompletion: 1n, verifiability: null }],
-      resetPeriod: null,
       enabled: false,
     },
   ];
-  assert.equal(referenceFor("glm-5.3", rails)?.railId, "0g");
+  assert.equal(referenceFor("glm-5.3", rails)?.railId, "near-ai");
   assert.equal(referenceFor("missing", rails), null);
 });
 

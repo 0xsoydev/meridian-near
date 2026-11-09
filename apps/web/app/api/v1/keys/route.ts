@@ -1,58 +1,49 @@
-import { z } from "zod";
-import { createKey, ensureAccount, listKeys, revokeKey } from "../../../../lib/accounts.ts";
-import { approvalAction } from "../../../../lib/approvals.ts";
-import { expectedHost, routerKey, verifySigned } from "../../../../lib/auth.ts";
+import { createKey, ensureAccount, listKeys } from "../../../../lib/accounts.ts";
+import { expectedHost, verifySigned } from "../../../../lib/auth.ts";
 import { fail } from "../../../../lib/errors.ts";
-import { verifyWorld } from "../../../../lib/world.ts";
+import { capOf } from "../../../../lib/pay.ts";
 import type { CreateKeyResult } from "../../../../lib/types";
 
-const worldSchema = z.object({ world: z.unknown() });
-
 export async function POST(request: Request): Promise<Response> {
-  const body: unknown = await request.json().catch(() => null);
-  const host = expectedHost(request);
-  const signed = await verifySigned(body, host, "create_key");
-  if (!signed) return fail(401, "invalid_api_key", "a fresh wallet signature is required");
-
-  const world = worldSchema.safeParse(body).data?.world;
-  let worldNullifier: string | null = null;
-  if (world !== undefined && world !== null) {
-    const checked = await verifyWorld(world, { action: approvalAction(), signal: signed.address });
-    if ("error" in checked) return fail(400, "invalid_request", checked.error);
-    worldNullifier = checked.worldNullifier;
-  }
-
-  const account = await ensureAccount(signed.address, worldNullifier);
-  if ("conflict" in account) return fail(409, "invalid_request", "this human already has an account");
-
-  const key = await createKey(account.id);
+  const signed = await verifySigned(await request.json().catch(() => null), expectedHost(request), "create_key");
+  if (!signed) return fail(401, "invalid_api_key", "a fresh NEAR signature is required");
+  const account = await ensureAccount(signed.account);
+  const key = await createKey(account.id, null);
   const result: CreateKeyResult = { key: key.raw, key_id: key.id };
   return Response.json(result);
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const url = new URL(request.url);
+  const params = new URL(request.url).searchParams;
   const signed = await verifySigned(
     {
-      address: url.searchParams.get("address"),
-      message: url.searchParams.get("message"),
-      signature: url.searchParams.get("signature"),
+      account_id: params.get("account_id"),
+      public_key: params.get("public_key"),
+      signature: params.get("signature"),
+      nonce: params.get("nonce"),
+      message: params.get("message"),
     },
     expectedHost(request),
     "list_keys",
   );
-  if (!signed) return fail(401, "invalid_api_key", "a fresh wallet signature is required");
-
-  const account = await ensureAccount(signed.address, null);
-  if ("conflict" in account) return fail(409, "invalid_request", "account unavailable");
-  return Response.json({ keys: await listKeys(account.id) });
-}
-
-export async function DELETE(request: Request): Promise<Response> {
-  const key = await routerKey(request);
-  if (!key) return fail(401, "invalid_api_key", "invalid router key");
-  if (!(await revokeKey(key.id))) {
-    return fail(409, "invalid_request", "this key still holds a balance, bids, MTokens or offers; spend or cancel them first");
-  }
-  return new Response(null, { status: 204 });
+  if (!signed) return fail(401, "invalid_api_key", "a fresh NEAR signature is required");
+  const account = await ensureAccount(signed.account);
+  const listed = await listKeys(account.id);
+  const keys = await Promise.all(
+    listed.map(async (key) => {
+      if (!key.cap_key) return key;
+      const cap = await capOf(signed.account, key.cap_key).catch(() => null);
+      return cap
+        ? {
+            ...key,
+            cap: {
+              per_day_usd_micro: cap.per_day,
+              used_today_usd_micro: cap.used_today,
+              left_usd_micro: cap.left,
+            },
+          }
+        : key;
+    }),
+  );
+  return Response.json({ keys });
 }

@@ -1,17 +1,7 @@
 import { createServer } from "node:http";
 import { dailyClose, liquidateUnderwater, matchRestingBids, postIndexes, publishRollups, sweepStale } from "./jobs.ts";
 
-const REQUIRED = [
-  "DATABASE_URL",
-  "KEEPER_PRIVATE_KEY",
-  "HEDERA_TREASURY_ID",
-  "HEDERA_TREASURY_KEY",
-  "HCS_TOPIC_ID",
-  "NEXT_PUBLIC_PERP_MARKET",
-  "NEXT_PUBLIC_INDEX_ORACLE",
-  "NEXT_PUBLIC_MOCK_USDC",
-  "PERP_DEPLOY_BLOCK",
-];
+const REQUIRED = ["DATABASE_URL", "NEAR_OPS_ID", "NEAR_KEEPER_KEY", "NEAR_CORE_ID", "NEAR_USDC_ID", "SECRETS_KEY"];
 
 const missing = REQUIRED.filter((name) => !process.env[name]);
 if (missing.length > 0) {

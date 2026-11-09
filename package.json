@@ -9,5 +9,9 @@
     "dev": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
     "typecheck": "pnpm --filter web typecheck && pnpm --filter web exec tsc -p ../../keeper"
+  },
+  "devDependencies": {
+    "@types/node": "22.7.5",
+    "typescript": "7.0.2"
   }
 }

@@ -1,11 +1,7 @@
-import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq, lt, sql } from "drizzle-orm";
-import { walletOf } from "./accounts.ts";
-import { hashKey } from "./auth.ts";
 import { db } from "./db.ts";
-import { evmAddressOf, treasuryEvm } from "./mirror.ts";
-import { keys, usage } from "./schema.ts";
-import type { Balance, RailId } from "./types";
+import { usage } from "./schema.ts";
+import type { RailId } from "./types";
 
 export type ReserveInput = {
   keyId: string;
@@ -67,7 +63,6 @@ export async function reservePrepaid(input: PrepaidReserveInput): Promise<string
       where id = ${input.prepaidId}
         and key_id = ${input.keyId}
         and tokens_remaining >= ${input.tokens}
-        and (expires_at is null or expires_at > now())
       returning id, listing_id
     ), u as (
       insert into usage (status, rail, key_id, listing_id, prepaid_id, price_micro_per_mtok, reserved_tokens, reserved_usd_micro)
@@ -188,12 +183,7 @@ export type FillInput = {
   price: bigint;
   chargeMicro: bigint;
   sellerEarningMicro: bigint;
-  expiresAt: Date | null;
 };
-
-export function nextUtcMidnight(now: Date): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-}
 
 export async function fill(input: FillInput): Promise<{ listingOk: boolean; keyOk: boolean }> {
   const result = await db().execute<{ listing_ok: number; key_ok: number }>(sql`
@@ -224,8 +214,8 @@ export async function fill(input: FillInput): Promise<{ listingOk: boolean; keyO
       from li
       returning id
     ), p as (
-      insert into prepaid (key_id, listing_id, model, tokens_remaining, expires_at)
-      select ${input.keyId}, li.id, ${input.model}, ${input.tokens}, ${input.expiresAt ? input.expiresAt.toISOString() : null}
+      insert into prepaid (key_id, listing_id, model, tokens_remaining)
+      select ${input.keyId}, li.id, ${input.model}, ${input.tokens}
       from li
       returning id
     )
@@ -240,73 +230,16 @@ export async function prepaidHolding(keyId: string, model: string): Promise<bigi
   const result = await db().execute<{ total: string }>(sql`
     select coalesce(sum(tokens_remaining), 0)::text as total
     from prepaid
-    where key_id = ${keyId} and model = ${model} and (expires_at is null or expires_at > now())
+    where key_id = ${keyId} and model = ${model}
   `);
   return BigInt(result.rows[0]?.total ?? "0");
 }
 
-export type Payment = { txId: string; amountMicro: bigint; payer: string };
-
-export async function credit(keyId: string, payment: Payment): Promise<bigint | null> {
-  const result = await db().execute<{ balance_usd_micro: string }>(sql`
-    with t as (
-      insert into topups (tx_id, key_id, amount_usd_micro, payer)
-      values (${payment.txId}, ${keyId}, ${payment.amountMicro}, ${payment.payer})
-      on conflict (tx_id) do nothing
-      returning amount_usd_micro
-    )
-    update keys set balance_usd_micro = keys.balance_usd_micro + t.amount_usd_micro
-    from t
-    where keys.id = ${keyId}
-    returning keys.balance_usd_micro::text
-  `);
-  const row = result.rows[0];
-  return row ? BigInt(row.balance_usd_micro) : null;
-}
-
-export async function createFundedKey(payment: Payment): Promise<{ keyId: string; rawKey: string; balance: bigint } | null> {
-  const rawKey = `rk_${randomBytes(32).toString("base64url")}`;
-  const keyId = randomUUID();
-  const result = await db().execute<{ balance_usd_micro: string }>(sql`
-    with t as (
-      insert into topups (tx_id, key_id, amount_usd_micro, payer)
-      values (${payment.txId}, ${keyId}, ${payment.amountMicro}, ${payment.payer})
-      on conflict (tx_id) do nothing
-      returning amount_usd_micro
-    )
-    insert into keys (id, hash, balance_usd_micro)
-    select ${keyId}, decode(${hashKey(rawKey).toString("hex")}, 'hex'), t.amount_usd_micro
-    from t
-    returning balance_usd_micro::text
-  `);
-  const row = result.rows[0];
-  return row ? { keyId, rawKey, balance: BigInt(row.balance_usd_micro) } : null;
-}
-
-export async function toppedUpToday(keyId: string): Promise<bigint> {
+export async function prepaidTotal(keyId: string): Promise<bigint> {
   const result = await db().execute<{ total: string }>(sql`
-    select coalesce(sum(amount_usd_micro), 0)::text as total
-    from topups
-    where key_id = ${keyId} and created_at >= date_trunc('day', now(), 'UTC')
+    select coalesce(sum(tokens_remaining), 0)::text as total
+    from prepaid
+    where key_id = ${keyId}
   `);
   return BigInt(result.rows[0]?.total ?? "0");
-}
-
-export async function balanceOf(keyId: string): Promise<Balance | null> {
-  const row = (await db().select().from(keys).where(eq(keys.id, keyId)).limit(1))[0];
-  if (!row) return null;
-  return {
-    memo: keyId,
-    treasury: process.env.HEDERA_TREASURY_ID ?? null,
-    treasury_evm: await treasuryEvm().catch(() => null),
-    usdc_evm: evmAddressOf(process.env.HEDERA_USDC ?? "0.0.429274"),
-    wallet: await walletOf(row.accountId),
-    balance_usd_micro: row.balanceUsdMicro.toString(),
-    reserved_usd_micro: row.reservedUsdMicro.toString(),
-    topped_up_today_usd_micro: (await toppedUpToday(keyId)).toString(),
-    daily_topup_cap_usd_micro: row.dailyTopupCapUsdMicro.toString(),
-    auto_topup_usd_micro: row.autoTopupUsdMicro.toString(),
-    default_model: row.defaultModel,
-    human_linked: row.worldSub !== null,
-  };
 }
