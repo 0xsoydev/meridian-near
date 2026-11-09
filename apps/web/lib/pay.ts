@@ -33,6 +33,11 @@ export type TopUpResult = { floatMicro: bigint } | { blocked: Response };
 
 const inflight = new Map<string, Promise<TopUpResult>>();
 
+export async function refill(key: KeyRow): Promise<void> {
+  if (key.balanceUsdMicro >= LOW_FLOAT_MICRO) return;
+  await topUp(key, PULL_MICRO);
+}
+
 export function topUp(key: KeyRow, needMicro: bigint): Promise<TopUpResult> {
   const running = inflight.get(key.id);
   if (running) return running;
@@ -48,7 +53,7 @@ async function pullOnce(key: KeyRow, needMicro: bigint): Promise<TopUpResult> {
   const left = BigInt(cap.left);
   const short = needMicro - key.balanceUsdMicro;
   const target = key.capKey === "demo" ? DEMO_PULL_MICRO : PULL_MICRO;
-  const amount = minBig(maxBig(target, short), left, wallet);
+  const amount = minBig(minBig(maxBig(target, short), left), wallet);
   if (amount < short) return { blocked: await blocked(left < short ? "cap" : "wallet", key, needMicro) };
   await call({
     accountId: opsId(),

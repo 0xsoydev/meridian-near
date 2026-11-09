@@ -234,3 +234,12 @@ export async function prepaidHolding(keyId: string, model: string): Promise<bigi
   `);
   return BigInt(result.rows[0]?.total ?? "0");
 }
+
+export async function prepaidTotal(keyId: string): Promise<bigint> {
+  const result = await db().execute<{ total: string }>(sql`
+    select coalesce(sum(tokens_remaining), 0)::text as total
+    from prepaid
+    where key_id = ${keyId}
+  `);
+  return BigInt(result.rows[0]?.total ?? "0");
+}

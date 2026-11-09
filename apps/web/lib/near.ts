@@ -1,4 +1,4 @@
-import { Account, JsonRpcProvider } from "near-api-js";
+import { Account, JsonRpcProvider, type KeyPairString } from "near-api-js";
 import { verifyMessage } from "near-api-js/nep413";
 
 const RPC = {
@@ -45,8 +45,8 @@ export function opsId(): string {
   return required("NEAR_OPS_ID");
 }
 
-export function opsKey(): string {
-  return required("NEAR_WEB_KEY");
+export function opsKey(): KeyPairString {
+  return required("NEAR_WEB_KEY") as KeyPairString;
 }
 
 export async function view<T>(method: string, args: Record<string, unknown> = {}, contractId = coreId()): Promise<T> {
@@ -55,7 +55,7 @@ export async function view<T>(method: string, args: Record<string, unknown> = {}
 
 export type Call = {
   accountId: string;
-  privateKey: string;
+  privateKey: KeyPairString;
   method: string;
   args?: Record<string, unknown>;
   contractId?: string;

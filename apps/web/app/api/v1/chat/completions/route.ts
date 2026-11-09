@@ -1,24 +1,23 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
 import { z } from "zod";
 import { routerKey } from "../../../../../lib/auth.ts";
 import { asks, byCheapest } from "../../../../../lib/book.ts";
 import { db } from "../../../../../lib/db.ts";
 import { fail } from "../../../../../lib/errors.ts";
 import { release, reserve, reservePrepaid, settle, type SettleInput } from "../../../../../lib/ledger.ts";
+import { refill, topUp } from "../../../../../lib/pay.ts";
 import {
   charge,
   estimatePromptTokens,
-  formatMicroPerMtok,
   mixedTokens,
   railCost,
   reservation,
   sellerEarning,
 } from "../../../../../lib/price.ts";
 import { catalog, reference } from "../../../../../lib/rails.ts";
-import { listings, prepaid } from "../../../../../lib/schema.ts";
+import { listings, prepaid, type KeyRow } from "../../../../../lib/schema.ts";
 import { open } from "../../../../../lib/secrets.ts";
-import { applyPayment, paymentDue } from "../../../../../lib/x402.ts";
 import type { Pricing, Rail } from "../../../../../lib/types";
 
 export const maxDuration = 300;
@@ -46,7 +45,6 @@ const usageSchema = z.object({
 const replySchema = z.object({
   id: z.string().optional(),
   usage: usageSchema.nullish(),
-  x_0g_trace: z.object({ request_id: z.string().optional() }).nullish(),
   choices: z.array(z.object({ delta: z.unknown().optional(), message: z.unknown().optional() })).nullish(),
 });
 
@@ -71,6 +69,7 @@ type Candidate = {
 
 type Attempt = {
   request: Request;
+  key: KeyRow;
   candidate: Candidate;
   body: Body;
   maxTokens: number;
@@ -113,9 +112,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (known.length === 0) return fail(404, "model_not_found", `unknown model: ${requested}`);
 
-  const payment = await applyPayment(request, key);
-  if ("error" in payment) return payment.error;
-  const headers: Record<string, string> = payment.header ? { "PAYMENT-RESPONSE": payment.header } : {};
+  const headers: Record<string, string> = {};
 
   const candidates = (await Promise.all(known.map((id) => candidatesFor(key.id, id)))).flat();
   if (candidates.length === 0) return fail(404, "no_liquidity", `no asks for ${requested}`);
@@ -143,18 +140,28 @@ export async function POST(request: Request): Promise<Response> {
         micro: hold.micro,
       });
       if (reserved.listingOk && !reserved.keyOk) {
-        return (
-          (await paymentDue(request, key.id, hold.micro)) ??
-          fail(402, "insufficient_balance", "the balance changed while reserving; retry")
-        );
+        const topped = await topUp(key, hold.micro);
+        if ("blocked" in topped) return topped.blocked;
+        const retry = await reserve({
+          keyId: key.id,
+          listingId: candidate.listingId,
+          rail: candidate.rail.id,
+          price: candidate.ask,
+          tokens: hold.tokens,
+          micro: hold.micro,
+        });
+        if (!retry.listingOk) continue;
+        usageId = retry.usageId;
+      } else {
+        usageId = reserved.usageId;
       }
-      usageId = reserved.usageId;
     }
     if (!usageId) continue;
 
     if (shortlist) headers["X-Router-Model"] = candidate.model;
     const outcome = await attempt({
       request,
+      key,
       candidate,
       body,
       maxTokens,
@@ -187,12 +194,11 @@ async function candidatesFor(keyId: string, model: string): Promise<Candidate[]>
         eq(prepaid.keyId, keyId),
         eq(prepaid.model, model),
         gt(prepaid.tokensRemaining, 0n),
-        or(isNull(prepaid.expiresAt), gt(prepaid.expiresAt, now)),
         inArray(listings.status, ["active", "exhausted", "cancelled"]),
         or(isNull(listings.throttledUntil), lt(listings.throttledUntil, now)),
       ),
     )
-    .orderBy(sql`${prepaid.expiresAt} asc nulls last`, prepaid.createdAt);
+    .orderBy(prepaid.createdAt);
 
   const fromPrepaid: Candidate[] = [];
   for (const row of held) {
@@ -254,6 +260,7 @@ async function attempt(input: Attempt): Promise<Response | null> {
     } catch (error) {
       console.error("settle failed; the keeper sweep will release the hold", usageId, error);
     }
+    void refill(input.key);
   };
   const giveBack = async (): Promise<void> => {
     if (closed) return;
@@ -300,7 +307,7 @@ async function attempt(input: Attempt): Promise<Response | null> {
     const reply = replySchema.safeParse(payload);
     if (reply.success) {
       seen.usage = reply.data.usage ?? null;
-      seen.upstreamId = reply.data.x_0g_trace?.request_id ?? reply.data.id ?? null;
+      seen.upstreamId = reply.data.id ?? null;
       seen.forwardedBytes = (reply.data.choices ?? []).reduce((total, choice) => total + textBytes(choice.message), 0);
     }
     await finish();
@@ -352,11 +359,6 @@ function fetchUpstream(candidate: Candidate, payload: Record<string, unknown>, s
     authorization: `Bearer ${open(candidate.credential)}`,
     ...candidate.rail.extraHeaders,
   };
-  if (candidate.rail.id === "0g") {
-    headers["X-0G-Provider-Trust-Mode"] = "verified";
-    headers["X-0G-Provider-Max-Price-Usd-Prompt"] = formatMicroPerMtok(candidate.pricing.prompt);
-    headers["X-0G-Provider-Max-Price-Usd-Completion"] = formatMicroPerMtok(candidate.pricing.completion);
-  }
   if (candidate.rail.id === "opencode-go") headers["x-opencode-session"] = randomUUID();
   return fetch(`${candidate.rail.baseUrl}/chat/completions`, {
     method: "POST",
@@ -452,7 +454,7 @@ function streamed(
       }
       const chunk = replySchema.safeParse(json);
       if (!chunk.success) continue;
-      seen.upstreamId = chunk.data.x_0g_trace?.request_id ?? seen.upstreamId ?? chunk.data.id ?? null;
+      seen.upstreamId = chunk.data.id ?? seen.upstreamId ?? null;
       if (chunk.data.usage) seen.usage = chunk.data.usage;
       for (const choice of chunk.data.choices ?? []) seen.forwardedBytes += textBytes(choice.delta);
     }
