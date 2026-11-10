@@ -111,7 +111,7 @@ The web app and the keeper use separate keys so their nonces never collide. Each
 
 ```
 apps/web/
-  app/page.tsx                 landing: the story diagrams, markets, "use from your terminal"
+  app/page.tsx                 landing: the story diagrams, "use from your terminal", three ways in
   app/(site)/{trade,perps,sell,keys,receipts,agents}/
   app/a/[code]/page.tsx        approve an agent, or a higher limit
   app/api/v1/…, app/api/listings/…
@@ -347,7 +347,7 @@ The agent holds no NEAR key:
 
 | Page | Contents |
 |---|---|
-| `/` | four example diagrams that play once in view (a spare key sold as MTokens, an agent's daily limit and its raise, a perp hedge from `payoffLadder`, the index recompute from `recomputeIndex`); live markets (model, rails, TEE badge, best ask, index, discount, available MTok, venue 24 h volume); "Use from your terminal" with the one-line `skill.md` prompt |
+| `/` | a live line under the hero (best ask or index against list); example diagrams that play once in view, with Pause (a spare key sold as MTokens, an ask priced under list moving to the front of the book, an agent's daily limit and its raise, a perp hedge from `payoffLadder`, the index recompute from `recomputeIndex`); one request from limit to seller payout, pinned while its four steps scroll past on wide screens; "Use from your terminal" with the one-line `skill.md` prompt and a terminal that loops approve, buy, inference and sell; "Three ways in" with real captures of `/wallet`, `/sell` and `/perps`; under reduced motion every diagram shows its last frame and nothing advances |
 | `/agents` | the terminal guide: `skill.md`, the device flow, demo keys, what an agent can and cannot do |
 | `/a/[code]` | approve an agent or a higher limit: name, limit, wallet, one prompt to fund and approve, or deny |
 | `/wallet` | the Meridian wallet (deposit, withdraw, any chain), agents and keys behind one `list_keys` signature reused for four minutes (limit, used, float, raise, revoke), create a key and set its limit, recent requests |
