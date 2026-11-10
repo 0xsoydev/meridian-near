@@ -13,6 +13,7 @@
   --color-muted: #6f6f6f;
   --color-hover: #f5f5f5;
   --color-panel: #ebebeb;
+  --color-wash: #f6f6f6;
   --color-disabled: #bdbdbd;
   --color-up: #0b7d4f;
   --color-up-hover: #096a43;
@@ -24,6 +25,9 @@
   --color-on-dark: #f5f5f5;
   --ease-brand: cubic-bezier(0.22, 1, 0.36, 1);
   --animate-flash: flash 700ms var(--ease-brand);
+  --animate-rise: rise 900ms var(--ease-brand) both;
+  --animate-unveil: unveil 1600ms var(--ease-brand) both;
+  --animate-grow: grow linear both;
 
   @keyframes flash {
     from {
@@ -31,6 +35,26 @@
     }
     to {
       background-color: transparent;
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+  }
+  @keyframes unveil {
+    from {
+      opacity: 0;
+      transform: scale(1.035);
+    }
+  }
+  @keyframes grow {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
     }
   }
 }
@@ -95,20 +119,10 @@
   }
 }
 
-@property --vw {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 0px;
-}
-
-@media (min-width: 1024px) {
-  .desktop-wrap {
-    height: calc(5302 / 1728 * 100vw);
-    overflow: hidden;
-  }
-  .desktop-canvas {
-    --vw: 100vw;
-    transform: scale(tan(atan2(var(--vw), 1728px)));
-    transform-origin: top left;
+@layer components {
+  .blueprint {
+    background-image: radial-gradient(color-mix(in oklab, var(--color-accent) 22%, transparent) 1px, transparent 1.2px);
+    background-size: 16px 16px;
+    background-position: -1px -1px;
   }
 }

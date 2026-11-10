@@ -42,6 +42,8 @@ export function TerminalAnimationRoot({
   activeTab,
   onActiveTabChange,
   onComplete,
+  primed = false,
+  paused = false,
   className,
   children,
 }: {
@@ -49,6 +51,8 @@ export function TerminalAnimationRoot({
   activeTab: number;
   onActiveTabChange: (index: number) => void;
   onComplete?: () => void;
+  primed?: boolean;
+  paused?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -60,6 +64,7 @@ export function TerminalAnimationRoot({
   const [showCursor, setShowCursor] = useState(true);
   const timeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
   const completed = useRef(onComplete);
+  const ready = useRef(primed);
 
   useEffect(() => {
     completed.current = onComplete;
@@ -89,16 +94,17 @@ export function TerminalAnimationRoot({
     clearTimeouts();
     const tab = tabs[activeTab];
     if (!tab) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (paused || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setCommandTyped(tab.command);
       setIsTypingCommand(false);
       setVisibleLines(tab.lines.length);
       setShowCursor(false);
       return;
     }
+    const skip = ready.current;
     setVisibleLines(0);
-    setCommandTyped("");
-    setIsTypingCommand(true);
+    setCommandTyped(skip ? tab.command : "");
+    setIsTypingCommand(!skip);
     setShowCursor(true);
     if (!started) return;
 
@@ -127,9 +133,14 @@ export function TerminalAnimationRoot({
         showLines(0);
       }, 250);
     };
-    later(typeCommand, 300);
+    if (skip) {
+      ready.current = false;
+      later(() => showLines(0), 500);
+    } else {
+      later(typeCommand, 300);
+    }
     return clearTimeouts;
-  }, [activeTab, started, tabs, clearTimeouts]);
+  }, [activeTab, started, paused, tabs, clearTimeouts]);
 
   return (
     <TerminalAnimationContext.Provider

@@ -2,15 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-export const NAV_LINKS = [
-  { label: "Trade", href: "/trade" },
-  { label: "Perps", href: "/perps" },
-  { label: "Sell", href: "/sell" },
-  { label: "Wallet", href: "/wallet" },
-  { label: "Agents", href: "/agents" },
-  { label: "Receipts", href: "/receipts" },
-];
+import { NAV_LINKS } from "./nav-links";
 
 export function NavLinks() {
   const pathname = usePathname();
@@ -31,18 +23,6 @@ export function NavLinks() {
           </Link>
         );
       })}
-    </>
-  );
-}
-
-export function Navbar() {
-  return (
-    <>
-      <nav className="absolute right-[56px] top-0 flex h-[73px] w-[500px] items-center justify-center gap-[31px] border-b border-l border-[#CECECE] text-[16px] leading-[20px] text-[#1E1E1E]">
-        <NavLinks />
-      </nav>
-      <div aria-hidden className="pointer-events-none absolute left-[54px] top-0 h-[5462px] w-px bg-[#CECECE]" />
-      <div aria-hidden className="pointer-events-none absolute left-[1671px] top-[73px] h-[5389px] w-px bg-[#CECECE]" />
     </>
   );
 }

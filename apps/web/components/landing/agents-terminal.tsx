@@ -1,6 +1,9 @@
 "use client";
 
+import { Pause, Play } from "lucide-react";
+import { useReducedMotion } from "motion/react";
 import { useState } from "react";
+import { CopyButton } from "../copy-button";
 import {
   type TabContent,
   TerminalAnimationCommandBar,
@@ -10,6 +13,7 @@ import {
   TerminalAnimationTabTrigger,
   TerminalAnimationTrailingPrompt,
 } from "../ui/terminal-animation";
+import { H2, LEDE, WRAP } from "./shared";
 
 const OK = "text-[#2EBD85]";
 const ROUTE = "text-[#8FA2FF]";
@@ -56,14 +60,20 @@ const STEPS: TabContent[] = [
   },
 ];
 
-export function AgentsTerminal({ variant }: { variant: "page" | "canvas" | "bare" }) {
-  const canvas = variant === "canvas";
+const AGENTS = [
+  { name: "Claude Code", logo: "/images/rails/claudecode.svg" },
+  { name: "Codex", logo: "/images/rails/codex.svg" },
+  { name: "OpenCode", logo: "/images/rails/opencode.svg" },
+];
+
+export function AgentsTerminal({ variant, host = "" }: { variant: "section" | "bare"; host?: string }) {
+  const section = variant === "section";
   const [step, setStep] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const reduced = useReducedMotion();
 
   const terminal = (
-    <div
-      className={`relative overflow-hidden bg-[#56595D] ${canvas ? "mt-[34px] h-[600px] rounded-[6px]" : variant === "page" ? "mt-6 h-[440px]" : "h-[440px]"}`}
-    >
+    <div className={`relative overflow-hidden bg-[#56595D] ${section ? "h-[400px] lg:h-[420px]" : "h-[440px]"}`}>
       <img
         src="/images/terminal-rays.webp"
         alt=""
@@ -78,13 +88,18 @@ export function AgentsTerminal({ variant }: { variant: "page" | "canvas" | "bare
         activeTab={step}
         onActiveTabChange={setStep}
         onComplete={() => setStep((current) => (current + 1) % STEPS.length)}
+        primed
+        paused={paused}
         className={`absolute bottom-0 flex flex-col rounded-t-[6px] border border-b-0 border-white/10 bg-[#1A1A1A] ${
-          canvas ? "left-1/2 top-[110px] w-[1000px] -translate-x-1/2" : "inset-x-4 top-12"
+          section ? "inset-x-4 top-10 sm:inset-x-8 lg:left-1/2 lg:right-auto lg:top-[56px] lg:w-[min(1000px,86%)] lg:-translate-x-1/2" : "inset-x-4 top-12"
         }`}
       >
         <div
-          className={`min-h-0 flex-1 overflow-x-auto whitespace-pre font-mono text-[#F5F5F5] [scrollbar-color:rgba(255,255,255,0.2)_transparent] ${
-            canvas ? "px-10 pb-6 pt-9 text-[16px] leading-[30px]" : "px-4 pb-4 pt-5 text-[12px] leading-[22px]"
+          tabIndex={0}
+          role="region"
+          aria-label="Terminal output"
+          className={`min-h-0 flex-1 overflow-x-auto whitespace-pre font-mono focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#8FA2FF] text-[#F5F5F5] [scrollbar-color:rgba(255,255,255,0.2)_transparent] ${
+            section ? "px-4 pb-4 pt-5 text-[12px] leading-[22px] lg:px-10 lg:pb-6 lg:pt-9 lg:text-[15px] lg:leading-[28px]" : "px-4 pb-4 pt-5 text-[12px] leading-[22px]"
           }`}
         >
           <div className="flex">
@@ -99,41 +114,67 @@ export function AgentsTerminal({ variant }: { variant: "page" | "canvas" | "bare
             </span>
           </TerminalAnimationTrailingPrompt>
         </div>
-        <TerminalAnimationTabList
-          className={`mx-auto flex rounded-[8px] border border-white/10 bg-white/5 p-1 font-mono ${
-            canvas ? "mb-7 text-[16px]" : "mb-4 text-[12px]"
-          }`}
-        >
-          {STEPS.map((item, index) => (
-            <TerminalAnimationTabTrigger
-              key={item.label}
-              index={index}
-              className={`rounded-[6px] text-[#9A9A9A] transition-colors duration-200 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8FA2FF] data-[state=active]:bg-[#EDEDED] data-[state=active]:text-[#1E1E1E] ${
-                canvas ? "px-4 py-1.5" : "px-2.5 py-1"
-              }`}
+        <div className={`mb-4 flex items-stretch justify-center gap-2 ${section ? "lg:mb-7" : ""}`}>
+          <TerminalAnimationTabList
+            className={`flex rounded-[8px] border border-white/10 bg-white/5 p-1 font-mono text-[12px] ${section ? "lg:text-[15px]" : ""}`}
+          >
+            {STEPS.map((item, index) => (
+              <TerminalAnimationTabTrigger
+                key={item.label}
+                index={index}
+                className={`rounded-[6px] px-2.5 py-1 text-[#9A9A9A] transition-colors duration-200 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8FA2FF] data-[state=active]:bg-[#EDEDED] data-[state=active]:text-[#1E1E1E] ${
+                  section ? "lg:px-4 lg:py-1.5" : ""
+                }`}
+              >
+                {item.label}
+              </TerminalAnimationTabTrigger>
+            ))}
+          </TerminalAnimationTabList>
+          {reduced ? null : (
+            <button
+              type="button"
+              aria-label={paused ? "Play the demo" : "Pause the demo"}
+              onClick={() => setPaused((value) => !value)}
+              className="flex aspect-square items-center justify-center rounded-[8px] border border-white/10 bg-white/5 text-[#9A9A9A] transition-colors duration-200 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8FA2FF]"
             >
-              {item.label}
-            </TerminalAnimationTabTrigger>
-          ))}
-        </TerminalAnimationTabList>
+              {paused ? <Play aria-hidden className="size-3.5" /> : <Pause aria-hidden className="size-3.5" />}
+            </button>
+          )}
+        </div>
       </TerminalAnimationRoot>
     </div>
   );
 
-  if (variant === "bare") return terminal;
+  if (!section) return terminal;
+
+  const prompt = `Read ${host}/skill.md and get a Meridian router key.`;
 
   return (
-    <section className={canvas ? "absolute left-[55px] top-[3448px] w-[1617px]" : "mt-16 border-t border-[#CECECE] pb-14 pt-10"}>
-      <h2
-        className={
-          canvas
-            ? "ml-[48px] font-serif text-[60px] font-normal leading-[72px] text-black"
-            : "px-6 font-serif text-[34px] leading-[1.1] text-black"
-        }
-      >
-        How agents use Meridian
-      </h2>
-      {terminal}
+    <section aria-labelledby="agents-title" className="border-t border-line py-16 sm:py-24 lg:py-32">
+      <div className={WRAP}>
+        <div className="flex flex-col gap-5">
+          <h2 id="agents-title" className={H2}>
+            Point your agent at Meridian
+          </h2>
+          <p className={LEDE}>
+            Paste this into your coding agent. It reads the manual, asks you for one approval, then buys inference on its own.
+          </p>
+        </div>
+        <div className="mt-10 flex max-w-[760px] flex-col items-start gap-3 border border-line bg-white p-4 sm:flex-row sm:items-center sm:py-2 sm:pr-2">
+          <code className="min-w-0 flex-1 break-words font-mono text-[13px] leading-[20px] text-ink sm:truncate">{prompt}</code>
+          <CopyButton value={prompt} label="Copy prompt" />
+        </div>
+        <ul className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-[14px] text-muted">
+          <li>Works with</li>
+          {AGENTS.map((agent) => (
+            <li key={agent.name} className="flex items-center gap-2 text-ink">
+              <img src={agent.logo} alt="" width={20} height={20} className="size-5 object-contain" />
+              {agent.name}
+            </li>
+          ))}
+        </ul>
+        <div className="mt-12 lg:mt-16">{terminal}</div>
+      </div>
     </section>
   );
 }

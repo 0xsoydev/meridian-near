@@ -1,0 +1,9 @@
+iphone-14-pro-frame.png is derived from "iPhone 14 Pro Frame — Black" in the
+"iPhone 14 Pro Free Vector Vol.02" pack by Craftwork:
+https://craftwork.design/asset/iphone-14-pro-frame-black-3c33d290
+
+Changes: background and placeholder screen removed, cropped to the device,
+resized, kept as an alpha mask.
+
+Licensed under the Craftwork Commercial License: https://craftwork.design/license
+Do not resell or redistribute this file on its own.

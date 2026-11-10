@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { useNear } from "../app/(site)/providers";
 import { FOCUS, ICON, SECONDARY } from "./kit";
-import { NAV_LINKS } from "./site-nav";
+import { NAV_LINKS } from "./nav-links";
 
 const MENU_ITEM = `flex h-11 w-full items-center px-4 text-left text-[15px] transition-colors duration-150 ease-brand hover:bg-hover ${FOCUS}`;
 
