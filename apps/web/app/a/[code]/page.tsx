@@ -2,50 +2,64 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CommitButton, FOCUS, Field, INPUT, LINK, Line, Skeleton } from "../../../components/kit";
-import { api, usd } from "../../../lib/client";
+import { api, explorer, usd } from "../../../lib/client";
 import { formatMicroPerMtok, parseUsd } from "../../../lib/price";
+import type { ApprovalView, WalletView } from "../../../lib/types";
+import { anything, approvalSchema, walletSchema } from "../../../lib/wire";
 import { useNear, type NearTransaction } from "../../(site)/providers";
 
 const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
 const USDC = process.env.NEXT_PUBLIC_NEAR_USDC_ID ?? "";
 const NETWORK = process.env.NEXT_PUBLIC_NEAR_NETWORK === "mainnet" ? "NEAR mainnet" : "NEAR testnet";
 
-type Approval = { key_id: string; name: string; cap_usd_micro: string | null };
+type Problem = { field: "limit" | "fund" | "send"; text: string };
+
+const plain = (micro: bigint) => formatMicroPerMtok(micro).replaceAll(",", "");
 
 export default function ApprovePage() {
   const { code } = useParams<{ code: string }>();
   const { accountId, connect, send } = useNear();
-  const [approval, setApproval] = useState<Approval | null>(null);
+  const [approval, setApproval] = useState<ApprovalView | null>(null);
   const [missing, setMissing] = useState(false);
-  const [wallet, setWallet] = useState<bigint | null>(null);
+  const [wallet, setWallet] = useState<WalletView | null>(null);
   const [limit, setLimit] = useState("5");
   const [fund, setFund] = useState("0");
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<"approved" | "denied" | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const [done, setDone] = useState<{ kind: "approved" | "denied"; tx: string | null } | null>(null);
+  const [busy, setBusy] = useState<"approve" | "deny" | null>(null);
+  const limitRef = useRef<HTMLInputElement | null>(null);
+  const fundRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    void api<Approval>(`/api/v1/approvals/${code}`).then((result) => {
+    void api(`/api/v1/approvals/${code}`, approvalSchema).then((result) => {
       if (!result.ok) {
         setMissing(true);
         return;
       }
       setApproval(result.data);
-      if (result.data.cap_usd_micro) setLimit(formatMicroPerMtok(BigInt(result.data.cap_usd_micro)));
+      if (result.data.cap_usd_micro) setLimit(plain(BigInt(result.data.cap_usd_micro)));
     });
   }, [code]);
 
   useEffect(() => {
     if (!accountId) return;
-    void api<{ wallet_usd_micro: string }>(`/api/v1/wallet?account=${encodeURIComponent(accountId)}`).then((result) => {
-      if (result.ok) setWallet(BigInt(result.data.wallet_usd_micro));
+    void api(`/api/v1/wallet?account=${encodeURIComponent(accountId)}`, walletSchema).then((result) => {
+      if (result.ok) setWallet(result.data);
     });
   }, [accountId]);
 
   const perDay = parseUsd(limit);
   const amount = fund.trim() === "" ? 0n : parseUsd(fund);
+  const held = wallet ? BigInt(wallet.near_usdc_micro) : null;
+  const asked = approval?.cap_usd_micro ? BigInt(approval.cap_usd_micro) : null;
+
+  const flag = (field: Problem["field"], text: string) => {
+    setProblem({ field, text });
+    if (field === "limit") limitRef.current?.focus();
+    if (field === "fund") fundRef.current?.focus();
+  };
 
   const approve = async () => {
     if (!approval) return;
@@ -53,16 +67,12 @@ export default function ApprovePage() {
       await connect();
       return;
     }
-    if (perDay === null || perDay === 0n) {
-      setError("Enter a daily limit in USDC, like 5.");
-      return;
-    }
-    if (amount === null) {
-      setError("Enter an amount to add in USDC, or 0 to skip.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
+    if (perDay === null || perDay === 0n) return flag("limit", "Enter a daily limit in USDC, like 5.");
+    if (amount === null) return flag("fund", "Enter an amount in USDC, or 0 to skip.");
+    if (amount > 0n && amount < 100_000n) return flag("fund", "Deposits start at $0.10. Enter 0 to skip.");
+    if (held !== null && amount > held) return flag("fund", `Your NEAR account holds ${usd(held)} USDC.`);
+    setBusy("approve");
+    setProblem(null);
     const transactions: NearTransaction[] = [];
     if (amount > 0n) {
       transactions.push({
@@ -89,26 +99,30 @@ export default function ApprovePage() {
         },
       ],
     });
-    if (!(await send(transactions))) {
-      setBusy(false);
-      setError("The wallet didn't sign, so nothing changed.");
+    const hashes = await send(transactions);
+    if (!hashes) {
+      setBusy(null);
+      flag("send", "The wallet didn't sign, or the transaction failed, so nothing changed.");
       return;
     }
-    const confirmed = await api<unknown>(`/api/v1/approvals/${code}/confirm`, {
+    const confirmed = await api(`/api/v1/approvals/${code}/confirm`, anything, {
       method: "POST",
       body: JSON.stringify({ account_id: accountId }),
     });
-    setBusy(false);
+    setBusy(null);
     if (!confirmed.ok) {
-      setError("The limit isn't visible on chain yet. Wait a few seconds, then approve again.");
+      flag("send", "The limit isn't visible on chain yet. Wait a few seconds, then approve again.");
       return;
     }
-    setDone("approved");
+    setDone({ kind: "approved", tx: hashes.at(-1) ?? null });
   };
 
   const deny = async () => {
-    await api<unknown>(`/api/v1/approvals/${code}/deny`, { method: "POST" });
-    setDone("denied");
+    setBusy("deny");
+    const result = await api(`/api/v1/approvals/${code}/deny`, anything, { method: "POST" });
+    setBusy(null);
+    if (result.ok) setDone({ kind: "denied", tx: null });
+    else flag("send", result.message);
   };
 
   return (
@@ -128,18 +142,23 @@ export default function ApprovePage() {
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-16 w-full" />
         </section>
-      ) : done === "approved" ? (
+      ) : done?.kind === "approved" ? (
         <section className="flex flex-col gap-4">
           <h1 className="text-balance font-serif text-[34px] leading-[1.1] text-ink">{approval.name} is approved</h1>
           <p className="text-[16px] leading-[24px] text-ink">
             It picks up its key within a few seconds and can spend up to {perDay === null ? "the limit" : usd(perDay)} a day. Change the limit or revoke it any time on the{" "}
-            <Link href={`/keys?key=${approval.key_id}`} className={LINK}>
+            <Link href={`/wallet?key=${approval.key_id}`} className={LINK}>
               Wallet
             </Link>{" "}
             page.
           </p>
+          {done.tx ? (
+            <a href={explorer("txns", done.tx)} target="_blank" rel="noreferrer" className={`${LINK} self-start text-[14px] text-ink`}>
+              View the transaction
+            </a>
+          ) : null}
         </section>
-      ) : done === "denied" ? (
+      ) : done?.kind === "denied" ? (
         <section className="flex flex-col gap-4">
           <h1 className="font-serif text-[34px] leading-[1.1] text-ink">Denied</h1>
           <p className="text-[16px] leading-[24px] text-ink">{approval.name} gets no key and stops asking.</p>
@@ -156,35 +175,64 @@ export default function ApprovePage() {
           </div>
 
           <dl className="flex flex-col gap-2 border-y border-line py-4">
-            <Line label="Asked for">{approval.cap_usd_micro ? `${usd(BigInt(approval.cap_usd_micro))} a day` : "No amount"}</Line>
-            <Line label="Your wallet">{accountId ? (wallet === null ? "Reading" : usd(wallet)) : "Not connected"}</Line>
+            <Line label="Your Meridian wallet">{accountId ? (wallet === null ? "Reading" : usd(BigInt(wallet.wallet_usd_micro))) : "Not connected"}</Line>
+            {accountId ? <Line label="USDC in your NEAR account">{held === null ? "Reading" : usd(held)}</Line> : null}
             <Line label="Network">{NETWORK}</Line>
           </dl>
 
           <div className="flex flex-col gap-5">
-            <Field label="Daily limit (USDC)">
-              <input value={limit} onChange={(event) => setLimit(event.target.value)} inputMode="decimal" autoComplete="off" className={INPUT} />
+            <Field
+              label="Daily limit (USDC)"
+              alert={problem?.field === "limit"}
+              note={problem?.field === "limit" ? problem.text : asked !== null ? `The agent asked for ${usd(asked)} a day. You can set less.` : "The most it can spend each UTC day."}
+            >
+              <input
+                ref={limitRef}
+                value={limit}
+                onChange={(event) => setLimit(event.target.value)}
+                inputMode="decimal"
+                autoComplete="off"
+                aria-invalid={problem?.field === "limit"}
+                className={INPUT}
+              />
             </Field>
-            <Field label="Add to your wallet now (USDC)" note="0 skips it. It comes from the USDC in your NEAR account.">
-              <input value={fund} onChange={(event) => setFund(event.target.value)} inputMode="decimal" autoComplete="off" className={INPUT} />
+            <Field
+              label="Add to your wallet now (USDC)"
+              alert={problem?.field === "fund"}
+              note={problem?.field === "fund" ? problem.text : "0 skips it. It comes from the USDC in your NEAR account."}
+            >
+              <input
+                ref={fundRef}
+                value={fund}
+                onChange={(event) => setFund(event.target.value)}
+                inputMode="decimal"
+                autoComplete="off"
+                aria-invalid={problem?.field === "fund"}
+                className={INPUT}
+              />
             </Field>
           </div>
 
           <div className="flex flex-col gap-4">
-            <CommitButton disabled={busy} aria-busy={busy} onClick={() => void approve()} className="w-full">
-              {busy
+            <CommitButton disabled={busy !== null} aria-busy={busy === "approve"} onClick={() => void approve()} className="w-full">
+              {busy === "approve"
                 ? "Waiting for the wallet"
                 : !accountId
                   ? "Connect wallet to approve"
                   : `Approve ${perDay === null ? "" : usd(perDay)} a day`}
             </CommitButton>
-            {error ? (
+            {problem?.field === "send" ? (
               <p role="status" className="text-[13px] leading-[20px] text-down">
-                {error}
+                {problem.text}
               </p>
             ) : null}
-            <button type="button" onClick={() => void deny()} className={`${LINK} self-center text-[14px] text-muted`}>
-              Deny this agent
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void deny()}
+              className={`${LINK} flex h-10 items-center self-center text-[14px] text-muted disabled:cursor-not-allowed`}
+            >
+              {busy === "deny" ? "Denying" : "Deny this agent"}
             </button>
           </div>
 

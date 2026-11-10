@@ -44,6 +44,7 @@ export type ApiResult<T> =
 
 export async function api<T>(
   path: string,
+  schema: z.ZodType<T>,
   init: Omit<RequestInit, "headers"> & { key?: string; headers?: Record<string, string> } = {},
 ): Promise<ApiResult<T>> {
   const { key, headers = {}, ...rest } = init;
@@ -58,7 +59,12 @@ export async function api<T>(
       },
     });
     const body: unknown = response.status === 204 ? null : await response.json().catch(() => null);
-    if (response.ok) return { ok: true, data: body as T };
+    if (response.ok) {
+      const read = schema.safeParse(body);
+      return read.success
+        ? { ok: true, data: read.data }
+        : { ok: false, status: response.status, message: "The server's answer didn't match what this page expects. Reload and retry.", action: null };
+    }
     const parsed = errorSchema.safeParse(body);
     return {
       ok: false,

@@ -1,8 +1,8 @@
-import { createKey, ensureAccount, listKeys } from "../../../../lib/accounts.ts";
+import { createKey, ensureAccount, listKeys, recentUsage } from "../../../../lib/accounts.ts";
 import { expectedHost, verifySigned } from "../../../../lib/auth.ts";
 import { fail } from "../../../../lib/errors.ts";
 import { capOf } from "../../../../lib/pay.ts";
-import type { CreateKeyResult } from "../../../../lib/types";
+import type { CreateKeyResult, KeyList } from "../../../../lib/types";
 
 export async function POST(request: Request): Promise<Response> {
   const signed = await verifySigned(await request.json().catch(() => null), expectedHost(request), "create_key");
@@ -28,7 +28,7 @@ export async function GET(request: Request): Promise<Response> {
   );
   if (!signed) return fail(401, "invalid_api_key", "a fresh NEAR signature is required");
   const account = await ensureAccount(signed.account);
-  const listed = await listKeys(account.id);
+  const [listed, usage] = await Promise.all([listKeys(account.id), recentUsage(account.id)]);
   const keys = await Promise.all(
     listed.map(async (key) => {
       if (!key.cap_key) return key;
@@ -45,5 +45,6 @@ export async function GET(request: Request): Promise<Response> {
         : key;
     }),
   );
-  return Response.json({ keys });
+  const result: KeyList = { keys, usage };
+  return Response.json(result);
 }

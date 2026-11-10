@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ConfirmButton } from "../../../components/confirm-button";
 import {
   CommitButton,
-  DANGER,
   Empty,
   Field,
   INPUT,
@@ -23,14 +23,37 @@ import {
 import { api, explorer, percent, railName, usd } from "../../../lib/client";
 import { MARKETS } from "../../../lib/markets";
 import { charge, formatMicroPerMtok, formatMtok, parseUsd, sellerEarning } from "../../../lib/price";
-import type { SellerListing, SellerListings, SellerPayouts } from "../../../lib/types";
+import type { Book, SellerListing, SellerPayouts, VenueStatus } from "../../../lib/types";
+import { anything, bookSchema, listingCreatedSchema, listingsSchema, payoutsSchema, statusSchema } from "../../../lib/wire";
 import { useNear } from "../providers";
 
 const TAKE_BPS = 1000n;
+const ORDINALS = ["1st", "2nd", "3rd"];
 
 type Offered = { id: string; models: ReadonlyArray<{ id: string; list: string }> };
 type Notice = { tone: "up" | "down"; text: string };
 type Draft = { price: string; capacity: string };
+type Problem = { field: "price" | "capacity" | "key" | "send"; text: string };
+
+function ordinal(n: number): string {
+  return ORDINALS[n - 1] ?? `${n}th`;
+}
+
+function Landing({ book, index, price }: { book: Book | null; index: string | null; price: bigint | null }) {
+  if (!book) return null;
+  const asks = book.asks.map((ask) => ({ price: BigInt(ask.price_micro_per_mtok), tokens: BigInt(ask.tokens_left) }));
+  const best = asks.reduce<bigint | null>((low, ask) => (low === null || ask.price < low ? ask.price : low), null);
+  const ahead = price === null ? [] : asks.filter((ask) => ask.price <= price);
+  const depth = ahead.reduce((total, ask) => total + ask.tokens, 0n);
+  return (
+    <dl aria-live="polite" className="flex flex-col gap-1.5 border-l-2 border-line pl-3">
+      <Line label="Place in line">{price === null ? "Enter a price" : asks.length === 0 ? "First ask in the book" : `${ordinal(ahead.length + 1)} of ${asks.length + 1}`}</Line>
+      <Line label="Ahead of you">{price === null ? "None" : `${formatMtok(depth)} MTok`}</Line>
+      <Line label="Best ask now">{best === null ? "None" : usd(best)}</Line>
+      {index !== null ? <Line label="Index">{usd(BigInt(index))}</Line> : null}
+    </dl>
+  );
+}
 
 function preferred(models: Offered["models"]): string {
   return (models.find((entry) => MARKETS.some((market) => market === entry.id)) ?? models[0])?.id ?? "";
@@ -65,14 +88,20 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
   const [payouts, setPayouts] = useState<SellerPayouts | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
   const [tableNotice, setTableNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [book, setBook] = useState<Book | null>(null);
+  const [status, setStatus] = useState<VenueStatus | null>(null);
+  const priceRef = useRef<HTMLInputElement | null>(null);
+  const capacityRef = useRef<HTMLInputElement | null>(null);
+  const keyRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
     if (!accountId) return;
     const [listed, paid] = await Promise.all([
-      api<SellerListings>(`/api/listings?seller=${encodeURIComponent(accountId)}`),
-      api<SellerPayouts>(`/api/v1/payouts?seller=${encodeURIComponent(accountId)}`),
+      api(`/api/listings?seller=${encodeURIComponent(accountId)}`, listingsSchema),
+      api(`/api/v1/payouts?seller=${encodeURIComponent(accountId)}`, payoutsSchema),
     ]);
     setListings(listed.ok ? listed.data.listings : []);
     if (paid.ok) setPayouts(paid.data);
@@ -84,6 +113,28 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    void api("/api/v1/status", statusSchema).then((result) => {
+      if (result.ok) setStatus(result.data);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!model) return;
+    let alive = true;
+    setBook(null);
+    const read = () =>
+      void api(`/api/v1/book?model=${encodeURIComponent(model)}`, bookSchema).then((result) => {
+        if (alive && result.ok) setBook(result.data);
+      });
+    read();
+    const id = window.setInterval(read, 15_000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [model]);
+
   const models = rails.find((entry) => entry.id === rail)?.models ?? [];
   const chosen = models.find((entry) => entry.id === model) ?? null;
   const list = chosen ? BigInt(chosen.list) : null;
@@ -93,19 +144,28 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
   const ceiling = micro !== null && mtok > 0n ? sellerEarning(charge(mtok * 1_000_000n, micro), TAKE_BPS) : null;
   const reusable = (listings ?? []).filter((listing) => listing.rail === rail && listing.status !== "cancelled");
   const provider = railName(rail);
+  const index = status?.markets.find((market) => market.model === model)?.index_micro_per_mtok ?? null;
+
+  const flag = (field: Problem["field"], text: string) => {
+    setProblem({ field, text });
+    if (field === "price") priceRef.current?.focus();
+    if (field === "capacity") capacityRef.current?.focus();
+    if (field === "key") keyRef.current?.focus();
+  };
 
   const submit = async () => {
     if (!accountId) {
       await connect();
       return;
     }
-    if (!chosen) return setNotice({ tone: "down", text: "Pick a model this provider serves." });
-    if (micro === null || micro === 0n) return setNotice({ tone: "down", text: "Enter a price in USD per MTok, like 0.17." });
-    if (above && list !== null) return setNotice({ tone: "down", text: `Price it at or below ${provider}'s list price of ${usd(list)}.` });
-    if (mtok === 0n) return setNotice({ tone: "down", text: "Enter the capacity in whole MTok, like 20." });
-    if (!source && apiKey.trim() === "") return setNotice({ tone: "down", text: `Paste your ${provider} API key, or reuse one you listed before.` });
-    setBusy("list");
     setNotice(null);
+    if (!chosen) return flag("send", "Pick a model this provider serves.");
+    if (micro === null || micro === 0n) return flag("price", "Enter a price in USD per MTok, like 0.17.");
+    if (above && list !== null) return flag("price", `Price it at or below ${provider}'s list price of ${usd(list)}.`);
+    if (mtok === 0n) return flag("capacity", "Enter the capacity in whole MTok, like 20.");
+    if (!source && apiKey.trim() === "") return flag("key", `Paste your ${provider} API key, or reuse one you listed before.`);
+    setBusy("list");
+    setProblem(null);
     const signed = await sign("list", {
       rail,
       model: chosen.id,
@@ -115,16 +175,16 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
     });
     if (!signed) {
       setBusy(null);
-      setNotice({ tone: "down", text: "The wallet didn't sign, so nothing was listed." });
+      flag("send", "The wallet didn't sign, so nothing was listed.");
       return;
     }
-    const result = await api<{ listing_id: string }>("/api/listings", {
+    const result = await api("/api/listings", listingCreatedSchema, {
       method: "POST",
       body: JSON.stringify({ signed, credential: source ? { kind: "stored", listing_id: source } : { kind: "key", key: apiKey.trim() } }),
     });
     setBusy(null);
     if (!result.ok) {
-      setNotice({ tone: "down", text: result.message });
+      flag(source ? "send" : "key", result.message);
       return;
     }
     setApiKey("");
@@ -157,7 +217,7 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
       setTableNotice({ tone: "down", text: "The wallet didn't sign, so the listing is unchanged." });
       return;
     }
-    const result = await api<unknown>(`/api/listings/${listing.listing_id}`, { method: "PATCH", body: JSON.stringify({ signed }) });
+    const result = await api(`/api/listings/${listing.listing_id}`, anything, { method: "PATCH", body: JSON.stringify({ signed }) });
     setBusy(null);
     setTableNotice(
       result.ok ? { tone: "up", text: `Saved ${listing.model} at ${usd(next)} for ${draft.capacity} MTok.` } : { tone: "down", text: result.message },
@@ -166,7 +226,6 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
   };
 
   const delist = async (listing: SellerListing) => {
-    if (!window.confirm(`Delist ${listing.model} on ${railName(listing.rail)}? Buyers stop drawing on it. Earnings so far are still paid.`)) return;
     setBusy(`delist-${listing.listing_id}`);
     const signed = await sign("cancel", { listing_id: listing.listing_id, client_nonce: crypto.randomUUID() });
     if (!signed) {
@@ -174,7 +233,7 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
       setTableNotice({ tone: "down", text: "The wallet didn't sign, so the listing stays live." });
       return;
     }
-    const result = await api<unknown>(`/api/listings/${listing.listing_id}`, { method: "DELETE", body: JSON.stringify({ signed }) });
+    const result = await api(`/api/listings/${listing.listing_id}`, anything, { method: "DELETE", body: JSON.stringify({ signed }) });
     setBusy(null);
     setTableNotice(result.ok ? { tone: "up", text: `Delisted ${listing.model}.` } : { tone: "down", text: result.message });
     if (result.ok) await load();
@@ -234,11 +293,14 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                   </Field>
                 </Step>
                 <Step n={3}>
+                  <div className="flex flex-col gap-3">
                   <Field
                     label="Your price (USD per MTok)"
-                    alert={above}
+                    alert={above || problem?.field === "price"}
                     note={
-                      list === null
+                      problem?.field === "price"
+                        ? problem.text
+                        : list === null
                         ? undefined
                         : micro === null
                           ? `At or below ${usd(list)}. Lower asks fill first.`
@@ -248,22 +310,40 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                     }
                   >
                     <input
+                      ref={priceRef}
                       value={price}
                       onChange={(event) => setPrice(event.target.value)}
                       placeholder={list === null ? "0.17" : formatMicroPerMtok(list)}
                       inputMode="decimal"
                       autoComplete="off"
-                      aria-invalid={above}
+                      aria-invalid={above || problem?.field === "price"}
                       className={INPUT}
                     />
                   </Field>
+                  <Landing book={book} index={index} price={micro} />
+                  </div>
                 </Step>
                 <Step n={4}>
                   <Field
                     label="Capacity (MTok)"
-                    note={ceiling === null ? "The most buyers can draw before you top it up." : `Up to ${usd(ceiling)} if it all sells, after the 10% venue fee.`}
+                    alert={problem?.field === "capacity"}
+                    note={
+                      problem?.field === "capacity"
+                        ? problem.text
+                        : ceiling === null
+                          ? "The most buyers can draw before you top it up."
+                          : `Up to ${usd(ceiling)} if it all sells, after the 10% venue fee.`
+                    }
                   >
-                    <input value={capacity} onChange={(event) => setCapacity(event.target.value)} inputMode="numeric" autoComplete="off" className={INPUT} />
+                    <input
+                      ref={capacityRef}
+                      value={capacity}
+                      onChange={(event) => setCapacity(event.target.value)}
+                      inputMode="numeric"
+                      autoComplete="off"
+                      aria-invalid={problem?.field === "capacity"}
+                      className={INPUT}
+                    />
                   </Field>
                 </Step>
                 <Step n={5}>
@@ -283,9 +363,16 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                     {source === "" ? (
                       <Field
                         label={`${provider} API key`}
-                        note="Checked with one tiny request, then stored encrypted. It's opened only to serve a buyer's request."
+                        alert={problem?.field === "key"}
+                        note={
+                          problem?.field === "key"
+                            ? problem.text
+                            : "Checked with one tiny request, then stored encrypted. It's opened only to serve a buyer's request."
+                        }
                       >
                         <input
+                          ref={keyRef}
+                          aria-invalid={problem?.field === "key"}
                           type="password"
                           value={apiKey}
                           onChange={(event) => setApiKey(event.target.value)}
@@ -311,6 +398,11 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                 {notice ? (
                   <p role="status" className={`text-[13px] leading-[20px] ${notice.tone === "up" ? "text-up" : "text-down"}`}>
                     {notice.text}
+                  </p>
+                ) : null}
+                {problem?.field === "send" ? (
+                  <p role="status" className="text-[13px] leading-[20px] text-down">
+                    {problem.text}
                   </p>
                 ) : null}
               </div>
@@ -451,9 +543,14 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                         <button type="button" disabled={busy !== null} onClick={() => void amend(listing)} className={SECONDARY}>
                           {busy === `amend-${listing.listing_id}` ? "Signing" : "Save"}
                         </button>
-                        <button type="button" disabled={busy !== null} onClick={() => void delist(listing)} className={DANGER}>
-                          {busy === `delist-${listing.listing_id}` ? "Delisting" : "Delist"}
-                        </button>
+                        <ConfirmButton
+                          label="Delist"
+                          confirmLabel="Delist"
+                          question="Buyers stop drawing on it. Earnings so far are still paid."
+                          busy={busy === `delist-${listing.listing_id}` ? "Delisting" : null}
+                          disabled={busy !== null}
+                          onConfirm={() => void delist(listing)}
+                        />
                       </div>
                     ) : null}
                   </td>

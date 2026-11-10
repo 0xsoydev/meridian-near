@@ -2,8 +2,48 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { desc, eq, sql } from "drizzle-orm";
 import { hashKey } from "./auth.ts";
 import { db } from "./db.ts";
-import { accounts, keys } from "./schema.ts";
-import type { KeySummary } from "./types";
+import { accounts, keys, listings, usage } from "./schema.ts";
+import type { KeySummary, OwnerUsage } from "./types";
+
+export async function recentUsage(accountId: string): Promise<OwnerUsage[]> {
+  const rows = await db()
+    .select({
+      keyId: keys.id,
+      keyName: keys.name,
+      at: usage.createdAt,
+      model: listings.model,
+      rail: usage.rail,
+      status: usage.status,
+      prompt: usage.promptTokens,
+      completion: usage.completionTokens,
+      mixed: usage.mixedTokens,
+      charge: usage.chargeUsdMicro,
+      prepaidId: usage.prepaidId,
+      requestId: usage.upstreamRequestId,
+      proof: usage.proof,
+    })
+    .from(usage)
+    .innerJoin(keys, eq(keys.id, usage.keyId))
+    .innerJoin(listings, eq(listings.id, usage.listingId))
+    .where(eq(keys.accountId, accountId))
+    .orderBy(desc(usage.createdAt))
+    .limit(50);
+  return rows.map((row) => ({
+    key_id: row.keyId,
+    key_name: row.keyName ?? "key",
+    at: row.at.toISOString(),
+    model: row.model,
+    rail: row.rail,
+    status: row.status,
+    prompt_tokens: row.prompt,
+    completion_tokens: row.completion,
+    mixed_tokens: row.mixed.toString(),
+    charge_usd_micro: row.charge.toString(),
+    paid_from: row.prepaidId ? "prepaid" : "float",
+    upstream_request_id: row.requestId,
+    proof: row.proof !== null,
+  }));
+}
 
 export async function ensureAccount(address: string): Promise<{ id: string }> {
   const normalized = address.toLowerCase();

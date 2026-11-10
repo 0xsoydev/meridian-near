@@ -77,9 +77,13 @@ export type DeviceStart = {
 
 export type DeviceStatus = {
   status: "pending" | "approved" | "denied" | "expired";
-  key?: string;
-  key_id?: string;
+  key?: string | undefined;
+  key_id?: string | undefined;
 };
+
+export type ApprovalView = { key_id: string; name: string; cap_usd_micro: string | null };
+
+export type WalletView = { wallet_usd_micro: string; near_usdc_micro: string };
 
 export type ModelRow = {
   id: string;
@@ -159,17 +163,29 @@ export type Bid = {
 
 export type TradeResult = { fills: Trade[]; bid: Bid | null; prepaid_tokens: string };
 
-export type PerpFill = {
+export type PerpEvent = {
   tx_hash: string;
   at: string;
   model: string;
-  kind: "modify" | "liquidate";
-  size_change: string;
-  size_after: string;
+  kind: "modified" | "liquidated";
+  size: string;
+  margin_usd_micro: string;
   price_micro_per_mtok: string;
-  realized_pnl_usd_micro: string;
   fee_usd_micro: string;
   reward_usd_micro: string;
+};
+
+export type PerpMarket = {
+  model: string;
+  listed: boolean;
+  price_micro_per_mtok: string;
+  updated_at: string;
+  long_oi: string;
+  short_oi: string;
+  funding_rate_per_hour: string;
+  max_leverage: string;
+  max_oi: string;
+  posts: { price_micro_per_mtok: string; at: number }[];
 };
 
 export type PerpAccount = {
@@ -227,6 +243,10 @@ export type KeyUsage = {
   upstream_request_id: string | null;
   proof: boolean;
 };
+
+export type OwnerUsage = KeyUsage & { key_id: string; key_name: string };
+
+export type KeyList = { keys: KeySummary[]; usage: OwnerUsage[] };
 
 export type KeyFill = {
   at: string;

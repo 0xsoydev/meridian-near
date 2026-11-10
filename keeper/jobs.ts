@@ -1,8 +1,9 @@
 import { matchAllBids } from "../apps/web/lib/bids.ts";
 import { asks } from "../apps/web/lib/book.ts";
 import { releaseStale } from "../apps/web/lib/ledger.ts";
-import { call, keeperId, keeperKey, view } from "../apps/web/lib/near.ts";
+import { call, coreId, keeperId, keeperKey, view } from "../apps/web/lib/near.ts";
 import { closeDay, payPending, utcDay } from "../apps/web/lib/payouts.ts";
+import { perpEventsIn, recordPerpEvents, txHashOf } from "../apps/web/lib/perp-events.ts";
 import { MARKETS, readMarket } from "../apps/web/lib/perp.ts";
 import { blended, referenceFor } from "../apps/web/lib/price.ts";
 import { catalog } from "../apps/web/lib/rails.ts";
@@ -96,7 +97,10 @@ export async function liquidateUnderwater(): Promise<void> {
     const rows = await view<[string, string][]>("liquidatable", { from, limit: 100 });
     for (const [account, model] of rows) {
       try {
-        await keeperCall("liquidate", { account, model });
+        const price = (await readMarket(model)).price;
+        const outcome = await call({ accountId: keeperId(), privateKey: keeperKey(), method: "liquidate", args: { account, model } });
+        const hash = txHashOf(outcome);
+        if (hash) await recordPerpEvents(hash, perpEventsIn(outcome, coreId(), price)).catch(() => undefined);
         console.log(`[liquidate] ${account} on ${model}`);
       } catch (error) {
         console.log(`[liquidate] ${account} on ${model}: ${error instanceof Error ? error.message : "skipped"}`);

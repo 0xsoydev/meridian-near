@@ -71,7 +71,7 @@ Not used: Chain Signatures, x402, the Agent API, Sputnik DAO, NEP-245 MTokens.
  Agent, terminal ──https, rk_──> Router · Next.js 16 on Vercel ───────────────> LLM rails
    reads /skill.md                 /api/v1/chat/completions (OpenAI shape)       NEAR AI (TEE)
                                    /api/v1/device · me · trades · sells · book   OpenRouter · Anthropic · …
- Human, browser or phone           pages / /trade /perps /sell /keys /receipts /agents /a/[code]
+ Human, browser or phone           pages / /trade /perps /sell /wallet /receipts /agents /a/[code]
    │ NEAR wallet (near-connect)    Neon Postgres: accounts · keys · listings · book · usage · payouts
    │                                  │ web key: pull
    │                                  v
@@ -169,14 +169,15 @@ Baseline §6, plus:
 | POST | `/api/v1/approvals/{user_code}/confirm` | none: the on-chain limit is the proof | `{account_id}` → approved when `cap(account_id, key).left > 0`; for `raise_cap` the account must own the key |
 | POST | `/api/v1/approvals/{user_code}/deny` | none | → denied |
 | GET | `/api/v1/me` | `Bearer rk_` | owner, wallet, float, limit (per day, used, left), prepaid, open orders; `?format=text` returns one line |
-| POST, GET | `/api/v1/keys` | NEP-413 `create_key`, `list_keys` | create or list the owner's keys |
+| POST, GET | `/api/v1/keys` | NEP-413 `create_key`, `list_keys` | create a key, or list the owner's keys with their last 50 requests |
 | DELETE | `/api/v1/keys/{id}` | NEP-413 `revoke_key` | revoke; the float becomes a refund payout (§9.4) |
 | PATCH | `/api/v1/keys/settings` | `Bearer rk_` | `default_model` only |
 | POST | `/api/v1/quotes` | none | 1Click quote to fund or withdraw; `dry` unless `execute:true` (§9.11) |
 | GET | `/api/v1/quotes/{deposit_address}` | none | 1Click status |
 | GET | `/api/v1/perps/account?account=` | none | wallet, positions, equity, liquidation prices from `core` |
-| GET | `/api/v1/perps/market?model=` | none | the market view and its recent index posts |
-| GET | `/api/v1/wallet?account=` | none | the Meridian wallet balance |
+| GET | `/api/v1/perps/market?model=` | none | the market view, the open-interest cap and its recent index posts |
+| GET, POST | `/api/v1/perps/history` | none | an account's `position_modified` and `liquidated` events, newest first; POST takes up to four transaction hashes, reads their outcomes over RPC and stores the events `core` itself emitted, so nothing a caller sends can forge one; the keeper records its liquidations |
+| GET | `/api/v1/wallet?account=` | none | the Meridian wallet balance and the USDC still in the NEAR account |
 | POST | `/api/v1/keys/revoke` | NEP-413 `revoke_key` | revoke an owner's key |
 | GET | `/api/v1/approvals/[userCode]` | the user code | the key id and requested limit for `/a/[code]` |
 | kept | `trades`, `sells`, `bids`, `offers`, `holdings`, `fills`, `usage`, `book`, `models`, `status`, `payouts`, `/api/listings/*` | as before | a short float refills by `pull`; listings are NEP-413 signed; `status` also reports the treasury's liabilities |
@@ -199,7 +200,7 @@ Many OpenAI clients show only `error.message`, so the message carries the link. 
 ```
 
 - `403 approval_required`: today's limit is used, or no limit is set. It opens or reuses a `raise_cap` approval.
-- `402 insufficient_balance`: the owner's wallet can't cover the pull. `url` is `/keys?fund=<micro>`.
+- `402 insufficient_balance`: the owner's wallet can't cover the pull. `url` is `/wallet?key=<id>`.
 - Demo keys get `403` with "the shared demo limit is used up today" and the device-flow command.
 - `qr` is `qrcode.toString(url, { type: "utf8" })`.
 
@@ -226,7 +227,7 @@ Baseline §9 steps 1–12, with these changes:
 5. The page posts `confirm {account_id}`. The router reads `cap(account_id, key_id)`; if it has room, one statement sets the key's owner and hash, seals the new `rk_` into the approval and marks it `approved`.
 6. The next poll returns the key once and deletes the sealed copy. Deny → `denied`; past 10 minutes → `expired`.
 
-### 9.2 Wallet and keys (`/keys`)
+### 9.2 Wallet and keys (`/wallet`, with `/keys` redirecting)
 
 - Balance from `core.wallet`.
 - Deposit: `ft_transfer_call(core, amount, {"fund":{}})`, or from any chain (§9.11).
@@ -236,7 +237,7 @@ Baseline §9 steps 1–12, with these changes:
 
 ### 9.3 Raising a limit
 
-A 403 opens a `raise_cap` approval. `/a/<code>` shows today's use and a new limit, the owner signs `set_cap`, the page posts `confirm`, and the approval turns `approved`. The agent polls `/api/v1/me` until `left > 0`. The owner can also raise it on `/keys` or with the printed `near` command.
+A 403 opens a `raise_cap` approval. `/a/<code>` shows today's use and a new limit, the owner signs `set_cap`, the page posts `confirm`, and the approval turns `approved`. The agent polls `/api/v1/me` until `left > 0`. The owner can also raise it on `/wallet` or with the printed `near` command.
 
 ### 9.4 Float top-up (`lib/pay.ts`)
 
@@ -253,9 +254,9 @@ export function reconcile(): Promise<number>;
 
 ### 9.5 Sellers (`/sell`)
 
-- Wallet → provider (never `near-ai`) → API key → free key check → model → price at or under list → capacity → one NEP-413 signature → `POST /api/listings`.
+- Wallet → provider (any rail, `near-ai` included; its proofs use the seller's key) → API key → free key check → model → price at or under list → capacity → one NEP-413 signature → `POST /api/listings`.
 - Stored-key reuse, amend and cancel work as in baseline §10.2, now NEP-413 signed.
-- Earnings show today, unpaid and paid, with NearBlocks links. Withdraw goes to `/keys`; "Short the index" goes to `/perps?model=…&side=short`.
+- Earnings show today, unpaid and paid, with NearBlocks links. Withdraw goes to `/wallet`; "Short the index" goes to `/perps?model=…&side=short`.
 
 ### 9.6 Spot
 
@@ -286,7 +287,7 @@ Perp fees and the 10 % take land in `treasury`. The owner takes revenue with `pa
 
 1. Checked every minute after 00:00 UTC: `closeDay(yesterday)` writes one `earnings` payout per seller and links the rows it sums.
 2. Each `pending` payout, earnings or refund: `core.payout(account, amount, payout.id)` with the keeper key, then `executed` with the tx hash. A retry is safe because a paid id is refused.
-3. The seller withdraws from `/keys`, to NEAR or any chain.
+3. The seller withdraws from `/wallet`, to NEAR or any chain.
 
 ### 9.11 Any chain in and out (`lib/intents.ts`)
 
@@ -349,9 +350,9 @@ The agent holds no NEAR key:
 | `/` | markets (model, rails, TEE badge, best ask, index, discount, 24 h volume) and "Use from your terminal" with the one-line `skill.md` command |
 | `/agents` | the terminal guide: `skill.md`, the device flow, demo keys, what an agent can and cannot do |
 | `/a/[code]` | approve an agent or a higher limit: name, limit, wallet, one prompt to fund and approve, or deny |
-| `/keys` | the Meridian wallet (deposit, withdraw, any chain), agents and keys behind one `list_keys` signature reused for four minutes (limit, used, float, raise, revoke), create a key and set its limit, recent requests |
-| `/trade` | baseline §14; a short float refills from the owner's wallet |
-| `/perps` | baseline §14; margin from the Meridian wallet, history from `core` |
+| `/wallet` | the Meridian wallet (deposit, withdraw, any chain), agents and keys behind one `list_keys` signature reused for four minutes (limit, used, float, raise, revoke), create a key and set its limit, recent requests |
+| `/trade` | baseline §14; a short float refills from the owner's wallet; size presets, keys B/S/M/L/`/`, prefill from `?model=&side=&size=&limit=` |
+| `/perps` | baseline §14; margin from the Meridian wallet, a payoff table at ±5/10/20 %, history from `perp_events` with explorer links, keys B/S/[/]/`/`, prefill from `?model=&side=&size=&leverage=` |
 | `/sell` | wallet → provider → key → model → price → capacity → one signature; earnings and payouts |
 | `/receipts` | rollups, index posts, NEAR AI proofs and payouts in a server component; the index recompute reads `core` over public NEAR RPC in the browser |
 
@@ -412,7 +413,7 @@ Removed: every `HEDERA_*`, `HCS_TOPIC_ID`, `X402_FACILITATOR_URLS`, `MIRROR_NODE
 | N1 | `core` | `cargo test` green; deployed on testnet; a script runs fund, `set_cap`, `pull`, `payout`, `modify`, `liquidate`, `withdraw` |
 | N2 | Router | NEP-413 auth; the device flow mints a key after an on-chain `set_cap`; a request on an empty float pulls once and streams; `/me` |
 | N3 | Keeper | rollups logged, index posted, one liquidation, one payout into a seller wallet |
-| N4 | Pages | wallet connect; `/a/[code]`; `/keys` fund, withdraw, raise, revoke; `/perps` trade; `/sell` list; `/trade` buy; `/receipts` recompute matches |
+| N4 | Pages | wallet connect; `/a/[code]`; `/wallet` fund, withdraw, raise, revoke; `/perps` trade; `/sell` list; `/trade` buy; `/receipts` recompute matches |
 | N5 | Any chain | `dry` quotes on every page; one 0.2 USDC fund from Base into `core` on mainnet |
 | N6 | NEAR AI | the house listing streams and its proof verifies on `/receipts` |
 | N7 | Ship | mainnet deploy and seed; demo agent run; README, LICENSE, video; the human posts and submits |

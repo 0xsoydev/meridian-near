@@ -38,9 +38,9 @@ function Row({ level, side, deepest, onPrice }: { level: Level; side: "ask" | "b
     <button
       type="button"
       onClick={() => onPrice(level.price)}
-      aria-label={`Use ${price} as the limit price`}
       className="relative grid h-6 w-full shrink-0 grid-cols-3 items-center px-4 text-[12px] tabular-nums transition-colors duration-150 ease-brand hover:bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
     >
+      <span className="sr-only">Use as the limit price: </span>
       <span
         aria-hidden
         className={`absolute inset-y-px left-0 ${side === "ask" ? "bg-down-tint/12" : "bg-up-tint/12"}`}
@@ -103,7 +103,7 @@ export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (pric
                 .map((level) => <Row key={`ask-${level.price}`} level={level} side="ask" deepest={deepest} onPrice={onPrice} />)
             )}
           </div>
-          <div className="grid h-7 shrink-0 grid-cols-3 items-center border-y border-line bg-hover px-4 text-[12px] tabular-nums">
+          <div className="grid h-7 shrink-0 grid-cols-3 items-center border-y border-line px-4 text-[12px] tabular-nums">
             <span className="text-muted">Spread</span>
             <span className="text-right text-ink">{spread === null ? "None" : formatMicroPerMtok(spread)}</span>
             <span className="text-right text-ink">{spread === null || bestAsk === null ? "" : percent(spread, bestAsk)}</span>
@@ -122,7 +122,11 @@ export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (pric
           {fills.length === 0 ? (
             <p className="px-4 py-6 text-center text-[12px] text-muted">No trades yet.</p>
           ) : (
-            <ol className="min-h-0 flex-1 overflow-y-auto">
+            <ol
+              tabIndex={0}
+              aria-label="Recent trades"
+              className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+            >
               {fills.map((fill, index) => {
                 const price = BigInt(fill.price_micro_per_mtok);
                 const older = fills[index + 1];

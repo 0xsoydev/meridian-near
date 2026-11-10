@@ -11,6 +11,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { z } from "zod";
+
+const outcomeSchema = z.object({
+  status: z.unknown().optional(),
+  transaction: z.object({ hash: z.string() }).optional(),
+  transaction_outcome: z.object({ id: z.string() }).optional(),
+});
 
 export type Signed = {
   account_id: string;
@@ -32,7 +39,7 @@ type Near = {
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   sign: (action: string, intent?: Record<string, unknown>) => Promise<Signed | null>;
-  send: (transactions: NearTransaction[]) => Promise<boolean>;
+  send: (transactions: NearTransaction[]) => Promise<string[] | null>;
 };
 
 const NearContext = createContext<Near | null>(null);
@@ -107,13 +114,20 @@ export function Providers({ children }: { children: ReactNode }) {
 
   const send = useCallback(async (transactions: NearTransaction[]) => {
     const instance = connector.current;
-    if (!instance) return false;
+    if (!instance) return null;
     try {
       const wallet = await instance.wallet();
-      await wallet.signAndSendTransactions({ transactions });
-      return true;
+      const outcomes = z.array(outcomeSchema).safeParse(await wallet.signAndSendTransactions({ transactions }));
+      if (!outcomes.success) return [];
+      if (outcomes.data.some((outcome) => typeof outcome.status === "object" && outcome.status !== null && "Failure" in outcome.status)) {
+        return null;
+      }
+      return outcomes.data.flatMap((outcome) => {
+        const hash = outcome.transaction?.hash ?? outcome.transaction_outcome?.id;
+        return hash ? [hash] : [];
+      });
     } catch {
-      return false;
+      return null;
     }
   }, []);
 

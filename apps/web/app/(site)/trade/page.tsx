@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
+  CHIP,
   CommitButton,
   Empty,
   FOCUS,
@@ -12,6 +13,7 @@ import {
   LINK,
   Line,
   MarketSelect,
+  MobileTabs,
   ROW,
   SECONDARY,
   Stat,
@@ -19,51 +21,45 @@ import {
   Table,
   Toggle,
 } from "../../../components/kit";
+import { Shortcuts } from "../../../components/shortcuts";
 import { KEY_STORAGE, api, percent, railName, shortKey, usd } from "../../../lib/client";
 import { MARKETS } from "../../../lib/markets";
+import { charge, fillsToPoints, formatMicroPerMtok, formatMtok, parseMtok, parseUsd, sellerEarning, stampFormat } from "../../../lib/price";
+import { quoteTicket, type Level } from "../../../lib/ticket";
+import type { Bid, BlockedAction, Book, Holding, KeyFill, Me, ModelRow, Offer, VenueStatus } from "../../../lib/types";
 import {
-  charge,
-  fillsToPoints,
-  formatMicroPerMtok,
-  formatMtok,
-  parseMtok,
-  parseUsd,
-  previewFill,
-  sellerEarning,
-  stampFormat,
-} from "../../../lib/price";
-import type {
-  Bid,
-  BlockedAction,
-  Book,
-  Holding,
-  KeyFill,
-  Me,
-  ModelRow,
-  Offer,
-  SellResult,
-  TradeResult,
-  VenueStatus,
-} from "../../../lib/types";
-import { CandleChart, INTERVALS, type Interval } from "./chart";
+  anything,
+  bidsSchema,
+  bookSchema,
+  fillsSchema,
+  holdingsSchema,
+  meSchema,
+  modelsSchema,
+  offersSchema,
+  sellResultSchema,
+  statusSchema,
+  tradeResultSchema,
+} from "../../../lib/wire";
+import { CandleChart, ChartCredit, INTERVALS, type Interval } from "./chart";
 import { OrderBook } from "./order-book";
 
 const TAKE_BPS = 1000n;
 const BOOK_MS = 5_000;
 const ACCOUNT_MS = 15_000;
 const STATUS_MS = 30_000;
+const PRESETS = [25n, 50n, 75n, 100n] as const;
 
 type Side = "buy" | "sell";
 type Mode = "market" | "limit";
-type Tab = "balances" | "holdings" | "orders" | "history";
+type Panel = "chart" | "book" | "trade" | "account";
+type View = "balances" | "holdings" | "orders" | "history";
 type Account = { me: Me; holdings: Holding[]; bids: Bid[]; offers: Offer[]; fills: KeyFill[] };
 type Notice = { tone: "up" | "down"; text: string; fix: { url: string; label: string } | null };
 type Problem = { field: "size" | "limit" | "key"; text: string };
-type Level = { price_micro_per_mtok: string; tokens_left: string };
 type Order = { id: string; kind: "bid" | "offer"; model: string; price: bigint; tokens: bigint; value: bigint; at: string };
 
-const smaller = (a: bigint, b: bigint) => (a < b ? a : b);
 const sum = (values: ReadonlyArray<string>) => values.reduce((total, value) => total + BigInt(value), 0n);
+const smaller = (a: bigint, b: bigint) => (a < b ? a : b);
 
 function byPrice(ascending: boolean) {
   return (a: Level, b: Level) => {
@@ -77,24 +73,6 @@ function sizeText(tokens: bigint): string {
   return formatMtok(tokens).replaceAll(",", "");
 }
 
-function maxBuy(levels: ReadonlyArray<Level>, budget: bigint | null, limit: bigint | null): bigint {
-  let left = budget;
-  let total = 0n;
-  for (const level of levels) {
-    const price = BigInt(level.price_micro_per_mtok);
-    const depth = BigInt(level.tokens_left);
-    if (left === null) {
-      total += depth;
-      continue;
-    }
-    const take = smaller(depth, (left * 1_000_000n) / price);
-    total += take;
-    left -= charge(take, price);
-    if (take < depth) return total;
-  }
-  return left !== null && limit !== null && limit > 0n ? total + (left * 1_000_000n) / limit : total;
-}
-
 function remedy(result: { status: number; action: BlockedAction | null }): Notice["fix"] {
   return result.action ? { url: result.action.url, label: result.status === 403 ? "Raise today's limit" : "Fund your wallet" } : null;
 }
@@ -105,6 +83,18 @@ function Ticker({ value }: { value: string }) {
     <span key={value} className={value === first.current ? undefined : "motion-safe:animate-flash"}>
       {value}
     </span>
+  );
+}
+
+function Balance({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-t border-line px-4 py-3 first:border-t-0">
+      <div className="flex items-baseline justify-between gap-4 text-[14px]">
+        <dt className="text-ink">{label}</dt>
+        <dd className="tabular-nums text-ink">{value}</dd>
+      </div>
+      <p className="text-[12px] leading-[18px] text-muted">{note}</p>
+    </div>
   );
 }
 
@@ -126,23 +116,35 @@ export default function TradePage() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("balances");
+  const [panel, setPanel] = useState<Panel>("chart");
+  const [view, setView] = useState<View>("balances");
   const current = useRef("");
   const sizeRef = useRef<HTMLInputElement | null>(null);
   const limitRef = useRef<HTMLInputElement | null>(null);
   const keyRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    const wanted = new URLSearchParams(window.location.search).get("model");
+    const params = new URLSearchParams(window.location.search);
+    const wanted = params.get("model");
     if (wanted) setModel(wanted);
+    const preset = params.get("side");
+    if (preset === "buy" || preset === "sell") setSide(preset);
+    const presetSize = params.get("size");
+    if (presetSize && parseMtok(presetSize) > 0n) setSize(presetSize);
+    const presetLimit = params.get("limit");
+    if (presetLimit && parseUsd(presetLimit) !== null) {
+      setMode("limit");
+      setLimit(presetLimit);
+    }
+    if (preset || presetSize || presetLimit) setPanel("trade");
     setKey(localStorage.getItem(KEY_STORAGE) ?? "");
-    void api<{ data: ModelRow[] }>("/api/v1/models").then((result) => {
+    void api("/api/v1/models", modelsSchema).then((result) => {
       if (!result.ok) return;
       setModels(result.data.data);
       if (!wanted) setModel(result.data.data.find((row) => row.available_tokens !== "0")?.id ?? MARKETS[0]);
     });
     const readStatus = () =>
-      void api<VenueStatus>("/api/v1/status").then((result) => {
+      void api("/api/v1/status", statusSchema).then((result) => {
         if (result.ok) setStatus(result.data);
       });
     readStatus();
@@ -153,7 +155,7 @@ export default function TradePage() {
   const readBook = useCallback(() => {
     const wanted = current.current;
     if (!wanted) return;
-    void api<Book>(`/api/v1/book?model=${encodeURIComponent(wanted)}`).then((result) => {
+    void api(`/api/v1/book?model=${encodeURIComponent(wanted)}`, bookSchema).then((result) => {
       if (result.ok && result.data.model === current.current) setBook(result.data);
     });
   }, []);
@@ -175,11 +177,11 @@ export default function TradePage() {
       return;
     }
     const [me, holdings, bids, offers, fills] = await Promise.all([
-      api<Me>("/api/v1/me", { key }),
-      api<{ data: Holding[] }>("/api/v1/holdings", { key }),
-      api<{ data: Bid[] }>("/api/v1/bids", { key }),
-      api<{ data: Offer[] }>("/api/v1/offers", { key }),
-      api<{ data: KeyFill[] }>("/api/v1/fills", { key }),
+      api("/api/v1/me", meSchema, { key }),
+      api("/api/v1/holdings", holdingsSchema, { key }),
+      api("/api/v1/bids", bidsSchema, { key }),
+      api("/api/v1/offers", offersSchema, { key }),
+      api("/api/v1/fills", fillsSchema, { key }),
     ]);
     if (!me.ok) {
       setAccount(null);
@@ -209,10 +211,7 @@ export default function TradePage() {
   const perp = MARKETS.find((market) => market === model);
   const index = status?.markets.find((market) => market.model === model)?.index_micro_per_mtok ?? null;
   const asks = useMemo(
-    () =>
-      (book?.asks ?? [])
-        .map((ask) => ({ price_micro_per_mtok: ask.price_micro_per_mtok, tokens_left: ask.tokens_left }))
-        .sort(byPrice(true)),
+    () => (book?.asks ?? []).map((ask) => ({ price_micro_per_mtok: ask.price_micro_per_mtok, tokens_left: ask.tokens_left })).sort(byPrice(true)),
     [book],
   );
   const bids = useMemo(
@@ -242,20 +241,7 @@ export default function TradePage() {
 
   const tokens = parseMtok(size);
   const limitPrice = mode === "limit" ? parseUsd(limit) : null;
-  const levels = side === "buy" ? asks : bids;
-  const reachable =
-    mode === "market"
-      ? levels
-      : limitPrice === null
-        ? []
-        : levels.filter((level) => {
-            const price = BigInt(level.price_micro_per_mtok);
-            return side === "buy" ? price <= limitPrice : price >= limitPrice;
-          });
-  const preview = previewFill(reachable, tokens, TAKE_BPS);
-  const resting = mode === "limit" && limitPrice !== null ? tokens - preview.fillable : 0n;
-  const restingValue = resting > 0n && limitPrice !== null ? charge(resting, limitPrice) : 0n;
-  const max = side === "buy" ? maxBuy(reachable, budget, mode === "limit" ? limitPrice : null) : held;
+  const { preview, resting, restingValue, max } = quoteTicket({ side, mode, asks, bids, tokens, limit: limitPrice, budget, held, takeBps: TAKE_BPS });
   const share = max > 0n ? Number(smaller(100n, (tokens * 100n) / max)) : 0;
   const fill: CSSProperties & Record<"--fill", string> = { "--fill": `${share}%` };
   const holdings = account?.holdings ?? [];
@@ -302,6 +288,7 @@ export default function TradePage() {
 
   const flag = (field: Problem["field"], text: string) => {
     setProblem({ field, text });
+    setPanel("trade");
     (field === "size" ? sizeRef : field === "limit" ? limitRef : keyRef).current?.focus();
   };
 
@@ -350,7 +337,7 @@ export default function TradePage() {
       ...(mode === "limit" && limitPrice !== null ? { limit_price_micro_per_mtok: limitPrice.toString() } : {}),
     });
     if (side === "buy") {
-      const result = await api<TradeResult>("/api/v1/trades", { method: "POST", key, body });
+      const result = await api("/api/v1/trades", tradeResultSchema, { method: "POST", key, body });
       if (result.ok) {
         const bought = sum(result.data.fills.map((item) => item.tokens));
         const paid = sum(result.data.fills.map((item) => item.charge_usd_micro));
@@ -369,7 +356,7 @@ export default function TradePage() {
         setNotice({ tone: "down", text: result.message, fix: remedy(result) });
       }
     } else {
-      const result = await api<SellResult>("/api/v1/sells", { method: "POST", key, body });
+      const result = await api("/api/v1/sells", sellResultSchema, { method: "POST", key, body });
       if (result.ok) {
         const sold = sum(result.data.fills.map((item) => item.tokens));
         const gross = sum(result.data.fills.map((item) => item.charge_usd_micro));
@@ -395,7 +382,7 @@ export default function TradePage() {
 
   const cancel = async (order: Order) => {
     setCancelling(order.id);
-    const result = await api<null>(`/api/v1/${order.kind === "bid" ? "bids" : "offers"}/${order.id}`, { method: "DELETE", key });
+    const result = await api(`/api/v1/${order.kind === "bid" ? "bids" : "offers"}/${order.id}`, anything, { method: "DELETE", key });
     setCancelling(null);
     setNotice(
       result.ok
@@ -411,14 +398,31 @@ export default function TradePage() {
     setSide("sell");
     setMode("market");
     setSize(sizeText(BigInt(holding.tokens)));
+    setPanel("trade");
     sizeRef.current?.focus();
   };
 
+  const shortcuts = [
+    { keys: "B", label: "Buy", run: () => chooseSide("buy") },
+    { keys: "S", label: "Sell", run: () => chooseSide("sell") },
+    { keys: "M", label: "Market order", run: () => chooseMode("market") },
+    { keys: "L", label: "Limit order", run: () => chooseMode("limit") },
+    {
+      keys: "/",
+      label: "Jump to size",
+      run: () => {
+        setPanel("trade");
+        sizeRef.current?.focus();
+      },
+    },
+  ];
+
   return (
-    <div className="flex flex-col">
-      <div className="flex flex-col gap-2 border-b border-line px-4 py-3 lg:h-16 lg:flex-row lg:items-center lg:gap-10 lg:px-6 lg:py-0">
+    <div className="flex flex-col pb-[52px] lg:pb-0">
+      <h1 className="sr-only">Trade {model || "MTokens"}</h1>
+      <div className="flex flex-col gap-3 border-b border-line px-4 py-3 lg:h-16 lg:flex-row lg:items-center lg:gap-10 lg:px-6 lg:py-0">
         <MarketSelect value={model} onChange={pick} groups={groups} />
-        <dl className="flex min-w-0 gap-8 overflow-x-auto pb-1 lg:pb-0">
+        <dl className="grid min-w-0 grid-cols-3 gap-x-4 gap-y-2 lg:flex lg:gap-8 lg:overflow-x-auto">
           <Stat label="Best ask">
             <Ticker value={bestAsk === null ? "None" : usd(bestAsk)} />
           </Stat>
@@ -435,53 +439,71 @@ export default function TradePage() {
             {bestAsk === null || listPrice === null || listPrice === 0n ? "No asks" : percent(bestAsk - listPrice, listPrice)}
           </Stat>
           <Stat label="Available">{formatMtok(depth)} MTok</Stat>
-          <Stat label="Sold by">{sellers.length > 0 ? sellers.join(", ") : "No sellers yet"}</Stat>
-          {row?.verifiability === "tee" ? <Stat label="Proofs">TEE attested</Stat> : null}
+          <Stat label="Sold by" className="hidden lg:flex">
+            {sellers.length > 0 ? sellers.join(", ") : "No sellers yet"}
+          </Stat>
+          {row?.verifiability === "tee" ? (
+            <Stat label="Proofs" className="hidden lg:flex">
+              TEE attested
+            </Stat>
+          ) : null}
         </dl>
+        <div className="ml-auto hidden lg:block">
+          <Shortcuts items={shortcuts} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:h-[max(560px,calc(100svh_-_260px))] lg:grid-cols-[minmax(0,1fr)_256px_280px] xl:grid-cols-[minmax(0,1fr)_280px_300px]">
-        <section aria-label="Price chart" className="flex min-h-0 flex-col border-b border-line lg:border-b-0 lg:border-r">
+        <section
+          aria-label="Price chart"
+          className={`${panel === "chart" ? "flex" : "hidden"} h-[calc(100svh-17rem)] min-h-[360px] flex-col lg:flex lg:h-auto lg:min-h-0 lg:border-r lg:border-line`}
+        >
           <div className="flex h-10 shrink-0 items-center justify-between gap-4 border-b border-line px-4">
             <Toggle label="Candle interval" value={bucket} onChange={setBucket} items={INTERVALS} />
-            {lastFill !== null ? (
-              <span className="text-[12px] tabular-nums text-muted">
-                Last fill <span className="text-ink">{usd(lastFill)}</span>
-              </span>
-            ) : null}
+            <div className="flex items-center gap-4">
+              {lastFill !== null ? (
+                <span className="whitespace-nowrap text-[12px] tabular-nums text-muted">
+                  Last fill <span className="text-ink">{usd(lastFill)}</span>
+                </span>
+              ) : null}
+              <ChartCredit />
+            </div>
           </div>
-          <div className="h-[320px] min-h-0 lg:h-auto lg:flex-1">
+          <div className="min-h-0 flex-1">
             <CandleChart points={points} bucket={Number(bucket)} empty="No fills yet. The first trade prints here." />
           </div>
         </section>
 
-        <div className="order-3 h-[460px] min-h-0 border-b border-line lg:order-2 lg:h-auto lg:border-b-0 lg:border-r">
+        <div
+          className={`${panel === "book" ? "block" : "hidden"} h-[calc(100svh-17rem)] min-h-[420px] lg:block lg:h-auto lg:min-h-0 lg:border-r lg:border-line`}
+        >
           <OrderBook
             book={book}
             onPrice={(price) => {
               setMode("limit");
               setLimit(formatMicroPerMtok(price));
               setProblem(null);
+              setPanel("trade");
             }}
           />
         </div>
 
-        <section aria-label="Order ticket" className="order-2 flex min-h-0 flex-col border-b border-line lg:order-3 lg:border-b-0">
+        <section aria-label="Order ticket" className={`${panel === "trade" ? "flex" : "hidden"} min-h-0 flex-col lg:flex`}>
           <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
             <Toggle
               label="Order type"
               value={mode}
               onChange={chooseMode}
               items={[
-                { value: "market", label: "Market" },
-                { value: "limit", label: "Limit" },
+                { value: "market", label: "Market", hotkey: "M" },
+                { value: "limit", label: "Limit", hotkey: "L" },
               ]}
             />
             {key ? (
               <button
                 type="button"
                 onClick={forgetKey}
-                className={`group flex h-8 items-center gap-1.5 text-[12px] text-muted transition-colors duration-150 ease-brand hover:text-ink ${FOCUS}`}
+                className={`group flex h-10 items-center gap-1.5 text-[12px] text-muted transition-colors duration-150 ease-brand hover:text-ink ${FOCUS}`}
               >
                 <span className="tabular-nums">{shortKey(key)}</span>
                 <span className="underline decoration-line underline-offset-[4px] transition-[text-decoration-color] duration-150 ease-brand group-hover:decoration-accent">
@@ -496,7 +518,7 @@ export default function TradePage() {
               event.preventDefault();
               void submit();
             }}
-            className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4"
+            className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 *:shrink-0"
           >
             <Toggle
               big
@@ -504,8 +526,8 @@ export default function TradePage() {
               value={side}
               onChange={chooseSide}
               items={[
-                { value: "buy", label: "Buy", tone: "up" },
-                { value: "sell", label: "Sell", tone: "down" },
+                { value: "buy", label: "Buy", tone: "up", hotkey: "B" },
+                { value: "sell", label: "Sell", tone: "down", hotkey: "S" },
               ]}
             />
             {key ? (
@@ -549,7 +571,7 @@ export default function TradePage() {
                 <p className={`text-[12px] leading-[18px] ${problem?.field === "key" ? "text-down" : "text-muted"}`}>
                   {problem?.field === "key" ? `${problem.text} ` : ""}
                   Create one on the{" "}
-                  <Link href="/keys" className={LINK}>
+                  <Link href="/wallet" className={LINK}>
                     Wallet
                   </Link>{" "}
                   page.
@@ -581,6 +603,7 @@ export default function TradePage() {
                 inputMode="decimal"
                 autoComplete="off"
                 aria-invalid={problem?.field === "size"}
+                aria-keyshortcuts="/"
                 className={INPUT}
               />
             </Field>
@@ -598,6 +621,13 @@ export default function TradePage() {
                 className={`range h-5 min-w-0 flex-1 ${FOCUS}`}
               />
               <span className="w-10 text-right text-[12px] tabular-nums text-muted">{share}%</span>
+            </div>
+            <div role="group" aria-label="Size presets" className="flex gap-1.5">
+              {PRESETS.map((part) => (
+                <button key={part.toString()} type="button" disabled={max === 0n} onClick={() => setSize(sizeText((max * part) / 100n))} className={CHIP}>
+                  {part === 100n ? "Max" : `${part}%`}
+                </button>
+              ))}
             </div>
             <dl className="flex flex-col gap-1.5 border-t border-line pt-3">
               <Line label="Average price">{preview.fillable === 0n ? "None" : usd(preview.avg)}</Line>
@@ -618,14 +648,8 @@ export default function TradePage() {
                 </>
               )}
             </dl>
-            <CommitButton type="submit" tone={side === "buy" ? "up" : "down"} disabled={busy} aria-busy={busy} className="mt-1 w-full">
-              {busy
-                ? side === "buy"
-                  ? "Buying"
-                  : "Selling"
-                : key
-                  ? `${side === "buy" ? "Buy" : "Sell"} ${sizeText(tokens)} MTok`
-                  : `Add a key to ${side}`}
+            <CommitButton type="submit" tone={!key ? "ink" : side === "buy" ? "up" : "down"} disabled={busy} aria-busy={busy} className="mt-2 w-full">
+              {busy ? (side === "buy" ? "Buying" : "Selling") : key ? `${side === "buy" ? "Buy" : "Sell"} ${sizeText(tokens)} MTok` : `Add a key to ${side}`}
             </CommitButton>
             {notice ? (
               <p role="status" className={`text-[13px] leading-[20px] ${notice.tone === "up" ? "text-up" : "text-down"}`}>
@@ -639,19 +663,19 @@ export default function TradePage() {
             ) : null}
             <p className="text-[12px] leading-[18px] text-muted">
               {side === "buy"
-                ? "Paid from the key's float first, then your wallet within today's limit."
-                : "Proceeds go to the key's float, minus the 10% venue fee."}
+                ? "Paid from the key's balance first, then your wallet within today's limit."
+                : "Proceeds go to the key's balance, minus the 10% venue fee."}
             </p>
           </form>
         </section>
       </div>
 
-      <section aria-label="Your account" className="border-t border-line">
+      <section aria-label="Your account" className={`${panel === "account" ? "block" : "hidden"} border-t border-line lg:block`}>
         <div className="flex h-10 items-center overflow-x-auto border-b border-line px-4">
           <Toggle
             label="Account view"
-            value={tab}
-            onChange={setTab}
+            value={view}
+            onChange={setView}
             items={[
               { value: "balances", label: "Balances" },
               { value: "holdings", label: `Holdings (${holdings.length})` },
@@ -663,45 +687,57 @@ export default function TradePage() {
         {!account ? (
           <Empty
             action={
-              <Link href="/keys" className={SECONDARY}>
+              <Link href="/wallet" className={SECONDARY}>
                 Create a key
               </Link>
             }
           >
             {accountError ?? "Add a router key in the ticket to see your balances, holdings and orders here."}
           </Empty>
-        ) : tab === "balances" ? (
-          <Table columns={[{ label: "Balance" }, { label: "Amount", end: true }, { label: "How it is spent" }]}>
-            <tr className={ROW}>
-              <td className={TD}>Wallet</td>
-              <td className={`${TD} text-right`}>{usd(BigInt(account.me.wallet_usd_micro))}</td>
-              <td className={`${TD} text-muted`}>USDC on NEAR, pulled into keys within their daily limits</td>
-            </tr>
-            <tr className={ROW}>
-              <td className={TD}>Key float</td>
-              <td className={`${TD} text-right`}>{usd(BigInt(account.me.float_usd_micro))}</td>
-              <td className={`${TD} text-muted`}>Held on this key and spent first</td>
-            </tr>
-            <tr className={ROW}>
-              <td className={TD}>Today&apos;s limit</td>
-              <td className={`${TD} text-right`}>
-                {usd(BigInt(account.me.cap.left_usd_micro))} of {usd(BigInt(account.me.cap.per_day_usd_micro))}
-              </td>
-              <td className={`${TD} text-muted`}>Resets at 00:00 UTC</td>
-            </tr>
-            <tr className={ROW}>
-              <td className={TD}>Prepaid capacity</td>
-              <td className={`${TD} text-right`}>{formatMtok(BigInt(account.me.prepaid_tokens))} MTok</td>
-              <td className={`${TD} text-muted`}>Across all models, spent before the float</td>
-            </tr>
-          </Table>
-        ) : tab === "holdings" ? (
+        ) : view === "balances" ? (
+          <>
+            <dl className="lg:hidden">
+              <Balance label="Wallet" value={usd(BigInt(account.me.wallet_usd_micro))} note="USDC on NEAR, pulled into keys within their daily limits" />
+              <Balance label="Key balance" value={usd(BigInt(account.me.float_usd_micro))} note="Held on this key and spent first" />
+              <Balance
+                label="Today's limit"
+                value={`${usd(BigInt(account.me.cap.left_usd_micro))} of ${usd(BigInt(account.me.cap.per_day_usd_micro))}`}
+                note="Resets at 00:00 UTC"
+              />
+              <Balance label="Prepaid capacity" value={`${formatMtok(BigInt(account.me.prepaid_tokens))} MTok`} note="Across all models, spent before the balance" />
+            </dl>
+            <div className="hidden lg:block">
+              <Table columns={[{ label: "Balance" }, { label: "Amount", end: true }, { label: "How it is spent" }]}>
+                <tr className={ROW}>
+                  <td className={TD}>Wallet</td>
+                  <td className={`${TD} text-right`}>{usd(BigInt(account.me.wallet_usd_micro))}</td>
+                  <td className={`${TD} text-muted`}>USDC on NEAR, pulled into keys within their daily limits</td>
+                </tr>
+                <tr className={ROW}>
+                  <td className={TD}>Key balance</td>
+                  <td className={`${TD} text-right`}>{usd(BigInt(account.me.float_usd_micro))}</td>
+                  <td className={`${TD} text-muted`}>Held on this key and spent first</td>
+                </tr>
+                <tr className={ROW}>
+                  <td className={TD}>Today&apos;s limit</td>
+                  <td className={`${TD} text-right`}>
+                    {usd(BigInt(account.me.cap.left_usd_micro))} of {usd(BigInt(account.me.cap.per_day_usd_micro))}
+                  </td>
+                  <td className={`${TD} text-muted`}>Resets at 00:00 UTC</td>
+                </tr>
+                <tr className={ROW}>
+                  <td className={TD}>Prepaid capacity</td>
+                  <td className={`${TD} text-right`}>{formatMtok(BigInt(account.me.prepaid_tokens))} MTok</td>
+                  <td className={`${TD} text-muted`}>Across all models, spent before the balance</td>
+                </tr>
+              </Table>
+            </div>
+          </>
+        ) : view === "holdings" ? (
           holdings.length === 0 ? (
             <Empty>No MTokens held. Buy some to lock in today&apos;s price.</Empty>
           ) : (
-            <Table
-              columns={[{ label: "Model" }, { label: "Provider" }, { label: "Size (MTok)", end: true }, { label: "Expires (UTC)" }, { label: "" }]}
-            >
+            <Table columns={[{ label: "Model" }, { label: "Provider" }, { label: "Size (MTok)", end: true }, { label: "Expires (UTC)" }, { label: "" }]}>
               {holdings.map((holding) => (
                 <tr key={holding.prepaid_id} className={ROW}>
                   <td className={TD}>{holding.model}</td>
@@ -717,7 +753,7 @@ export default function TradePage() {
               ))}
             </Table>
           )
-        ) : tab === "orders" ? (
+        ) : view === "orders" ? (
           orders.length === 0 ? (
             <Empty>No open orders. A limit order that doesn&apos;t fill rests here.</Empty>
           ) : (
@@ -775,6 +811,17 @@ export default function TradePage() {
           </Table>
         )}
       </section>
+
+      <MobileTabs
+        value={panel}
+        onChange={setPanel}
+        items={[
+          { value: "chart", label: "Chart" },
+          { value: "book", label: "Book" },
+          { value: "trade", label: "Trade" },
+          { value: "account", label: "Account" },
+        ]}
+      />
     </div>
   );
 }
