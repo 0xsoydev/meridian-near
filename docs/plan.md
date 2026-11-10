@@ -111,7 +111,7 @@ The web app and the keeper use separate keys so their nonces never collide. Each
 
 ```
 apps/web/
-  app/page.tsx                 landing: markets, "use from your terminal"
+  app/page.tsx                 landing: the story diagrams, markets, "use from your terminal"
   app/(site)/{trade,perps,sell,keys,receipts,agents}/
   app/a/[code]/page.tsx        approve an agent, or a higher limit
   app/api/v1/…, app/api/listings/…
@@ -347,7 +347,7 @@ The agent holds no NEAR key:
 
 | Page | Contents |
 |---|---|
-| `/` | markets (model, rails, TEE badge, best ask, index, discount, 24 h volume) and "Use from your terminal" with the one-line `skill.md` command |
+| `/` | four example diagrams that play once in view (a spare key sold as MTokens, an agent's daily limit and its raise, a perp hedge from `payoffLadder`, the index recompute from `recomputeIndex`); live markets (model, rails, TEE badge, best ask, index, discount, available MTok, venue 24 h volume); "Use from your terminal" with the one-line `skill.md` prompt |
 | `/agents` | the terminal guide: `skill.md`, the device flow, demo keys, what an agent can and cannot do |
 | `/a/[code]` | approve an agent or a higher limit: name, limit, wallet, one prompt to fund and approve, or deny |
 | `/wallet` | the Meridian wallet (deposit, withdraw, any chain), agents and keys behind one `list_keys` signature reused for four minutes (limit, used, float, raise, revoke), create a key and set its limit, recent requests |
