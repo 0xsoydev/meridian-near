@@ -4,7 +4,8 @@ import { Menu } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { FOCUS, ICON } from "../kit";
-import { NAV_LINKS, NavLinks } from "../site-nav";
+import { NAV_LINKS } from "../nav-links";
+import { NavLinks } from "../site-nav";
 import { useTradeHref } from "./markets";
 
 const MENU_ITEM = `flex h-11 w-full items-center px-4 text-[15px] text-ink transition-colors duration-150 ease-brand hover:bg-hover ${FOCUS}`;

@@ -2,15 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-export const NAV_LINKS = [
-  { label: "Trade", href: "/trade" },
-  { label: "Perps", href: "/perps" },
-  { label: "Sell", href: "/sell" },
-  { label: "Wallet", href: "/wallet" },
-  { label: "Agents", href: "/agents" },
-  { label: "Receipts", href: "/receipts" },
-];
+import { NAV_LINKS } from "./nav-links";
 
 export function NavLinks() {
   const pathname = usePathname();
