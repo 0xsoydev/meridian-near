@@ -1,79 +1,74 @@
 import Link from "next/link";
+import { explorer } from "../../lib/client";
+import { FOCUS } from "../kit";
+import { NAV_LINKS } from "../nav-links";
 
-const LINK =
-  "w-fit text-[#1E1E1E] underline decoration-transparent underline-offset-[6px] transition-[text-decoration-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:decoration-[#1743FF] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1743FF] motion-reduce:transition-none";
-const GROUPS: { title: string; links: { label: string; href?: string }[] }[] = [
+const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
+const LINK = `w-fit text-[15px] leading-[24px] text-ink underline decoration-transparent underline-offset-[6px] transition-[text-decoration-color] duration-200 ease-brand hover:decoration-accent ${FOCUS}`;
+
+const GROUPS = [
+  { title: "Product", links: NAV_LINKS },
   {
-    title: "socials",
+    title: "Docs",
     links: [
-      { label: "Twitter X" },
-      { label: "Telegram" },
-      { label: "NearBlocks", href: "https://testnet.nearblocks.io" },
+      { label: "Agent manual", href: "/skill.md" },
+      { label: "Plan", href: "https://github.com/0xsoydev/meridian-near/blob/develop/docs/plan.md" },
+      { label: "README", href: "https://github.com/0xsoydev/meridian-near" },
     ],
   },
   {
-    title: "docs",
+    title: "On chain",
     links: [
-      { label: "Plan", href: "https://github.com/0xsoydev/meridian-near/blob/develop/docs/plan.md" },
-      { label: "README", href: "https://github.com/0xsoydev/meridian-near" },
-      { label: "Receipts", href: "/receipts" },
+      ...(CORE ? [{ label: "Core contract", href: explorer("address", CORE) }] : []),
+      { label: "Index receipts", href: "/receipts" },
     ],
   },
 ];
 
-export function SiteFooter({ variant }: { variant: "page" | "canvas" }) {
-  if (variant === "page") {
-    return (
-      <footer className="border-t border-[#CECECE] bg-[#EBEBEB] px-6 pb-10 pt-12">
-        <div className="flex gap-16">
-          {GROUPS.map((g) => (
-            <div key={g.title} className="flex flex-col gap-1.5 text-[16px] text-[#1E1E1E]">
-              <p className="text-[13px] text-[#757575]">[ {g.title} ]</p>
-              {g.links.map((l) =>
-                l.href ? (
-                  <Link key={l.label} href={l.href} className={LINK}>
-                    {l.label}
-                  </Link>
+export function SiteFooter() {
+  return (
+    <footer className="relative isolate overflow-hidden border-t border-line bg-panel">
+      <div className="mx-auto grid max-w-[1520px] gap-12 px-6 pb-[260px] pt-16 sm:pb-[340px] lg:grid-cols-[minmax(0,4fr)_minmax(0,6fr)] lg:px-12 lg:pb-[420px]">
+        <div className="flex flex-col gap-4">
+          <img src="/images/namelogo.svg" alt="Meridian" width={120} height={27} className="h-6 w-auto self-start" />
+          <p className="max-w-[34ch] text-pretty text-[15px] leading-[24px] text-ink">
+            A market for spare LLM capacity, settled in USDC on NEAR. Running on testnet for the NEAR hackathon.
+          </p>
+        </div>
+        <nav aria-label="Footer" className="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3">
+          {GROUPS.map((group) => (
+            <div key={group.title} className="flex flex-col gap-2">
+              <p className="text-[13px] text-ink/70">{group.title}</p>
+              {group.links.map((link) =>
+                link.href.startsWith("http") ? (
+                  <a key={link.label} href={link.href} target="_blank" rel="noreferrer" className={LINK}>
+                    {link.label}
+                  </a>
                 ) : (
-                  <span key={l.label}>{l.label}</span>
+                  <Link key={link.label} href={link.href} className={LINK}>
+                    {link.label}
+                  </Link>
                 ),
               )}
             </div>
           ))}
-        </div>
-        <div
-          className="mt-8 h-[220px] w-full bg-contain bg-center bg-no-repeat"
-          style={{ backgroundImage: "url(/images/goddess.webp)" }}
-        />
-      </footer>
-    );
-  }
-
-  return (
-    <>
-      <div className="absolute left-[55px] top-[3351px] h-[730px] w-[1617px] rounded-[6px] border border-[#CECECE] bg-[#EBEBEB]" />
-      <p className="absolute left-[864px] top-[3747px] -translate-x-1/2 font-['Instrument_Sans','Instrument_Serif_Fallback'] font-black text-[320px] leading-none text-[#757575]/30">MERIDIAN</p>
-
-      <div
-        className="absolute left-[676px] top-[3559px] h-[526px] w-[1052px] bg-cover bg-center"
-        style={{ backgroundImage: "url(/images/goddess.webp)" }}
-      />
-      <div className="absolute left-[138px] top-[3384px] flex gap-[120px]">
-        {GROUPS.map((g) => (
-          <div key={g.title} className="flex flex-col gap-[10px] text-[20px] leading-[30px] text-[#1E1E1E]">
-            <p className="text-[16px] leading-[24px] text-[#757575]">[ {g.title} ]</p>
-            {g.links.map((l) =>
-              l.href ? (
-                <Link key={l.label} href={l.href} className={LINK}>
-                  {l.label}
-                </Link>
-              ) : (
-                <span key={l.label}>{l.label}</span>
-              ),
-            )}
-          </div>
-        ))}
+        </nav>
       </div>
-    </>
+      <p
+        aria-hidden
+        className="pointer-events-none absolute -bottom-[0.18em] left-1/2 -z-10 -translate-x-1/2 select-none whitespace-nowrap font-sans text-[26vw] font-black leading-none text-ink/[0.07] lg:text-[21vw]"
+      >
+        MERIDIAN
+      </p>
+      <img
+        src="/images/goddess.webp"
+        alt=""
+        aria-hidden
+        loading="lazy"
+        width={1774}
+        height={887}
+        className="pointer-events-none absolute -bottom-2 right-0 -z-10 w-[min(100%,560px)] sm:w-[640px] lg:w-[860px]"
+      />
+    </footer>
   );
 }

@@ -1,48 +1,74 @@
 "use client";
 
+import { Menu } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { FOCUS, ICON, SECONDARY } from "./kit";
+import { NAV_LINKS } from "./nav-links";
 
-export const NAV_LINKS = [
-  { label: "Trade", href: "/trade" },
-  { label: "Perps", href: "/perps" },
-  { label: "Sell", href: "/sell" },
-  { label: "Wallet", href: "/wallet" },
-  { label: "Agents", href: "/agents" },
-  { label: "Receipts", href: "/receipts" },
-];
+export function LandingNav() {
+  const menu = useRef<HTMLDetailsElement>(null);
 
-export function NavLinks() {
-  const pathname = usePathname();
+  useEffect(() => {
+    const shut = (event: Event) => {
+      const details = menu.current;
+      if (!details?.open) return;
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !(event.target instanceof Node && details.contains(event.target))) {
+        details.open = false;
+      }
+    };
+    document.addEventListener("click", shut);
+    document.addEventListener("keydown", shut);
+    return () => {
+      document.removeEventListener("click", shut);
+      document.removeEventListener("keydown", shut);
+    };
+  }, []);
+
   return (
-    <>
-      {NAV_LINKS.map((link) => {
-        const active = pathname.startsWith(link.href);
-        return (
-          <Link
-            key={link.href}
-            href={link.href}
-            aria-current={active ? "page" : undefined}
-            className={`underline underline-offset-[6px] transition-[text-decoration-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1743FF] ${
-              active ? "decoration-[#1743FF]" : "decoration-transparent hover:decoration-[#1E1E1E]"
-            }`}
-          >
-            {link.label}
-          </Link>
-        );
-      })}
-    </>
-  );
-}
-
-export function Navbar() {
-  return (
-    <>
-      <nav className="absolute right-[56px] top-0 flex h-[73px] w-[500px] items-center justify-center gap-[31px] border-b border-l border-[#CECECE] text-[16px] leading-[20px] text-[#1E1E1E]">
-        <NavLinks />
-      </nav>
-      <div aria-hidden className="pointer-events-none absolute left-[54px] top-0 h-[5462px] w-px bg-[#CECECE]" />
-      <div aria-hidden className="pointer-events-none absolute left-[1671px] top-[73px] h-[5389px] w-px bg-[#CECECE]" />
-    </>
+    <header className="sticky top-0 z-50 border-b border-line bg-white">
+      <div className="mx-auto flex h-16 max-w-[1520px] items-center gap-12 px-6 lg:px-12">
+        <Link href="/" className={`flex shrink-0 items-center ${FOCUS}`}>
+          <img src="/images/namelogo.svg" alt="Meridian" width={110} height={25} className="h-[22px] w-auto" />
+        </Link>
+        <nav aria-label="Main" className="hidden items-center gap-8 text-[15px] text-ink lg:flex">
+          {NAV_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`underline decoration-transparent underline-offset-[6px] transition-[text-decoration-color] duration-200 ease-brand hover:decoration-ink ${FOCUS}`}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="hidden sm:block">
+            <Link href="/trade" className={SECONDARY}>
+              Enter the market
+            </Link>
+          </span>
+          <details ref={menu} className="group relative lg:hidden">
+            <summary aria-label="Menu" className={`${ICON} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
+              <Menu aria-hidden className="size-4" />
+            </summary>
+            <nav aria-label="Main" className="absolute right-0 top-full z-50 mt-2 w-60 border border-line bg-white py-1">
+              {[...NAV_LINKS, { label: "Enter the market", href: "/trade" }].map((link) => (
+                <Link
+                  key={link.label}
+                  href={link.href}
+                  onClick={() => {
+                    if (menu.current) menu.current.open = false;
+                  }}
+                  className={`flex h-11 items-center px-4 text-[15px] text-ink transition-colors duration-150 ease-brand hover:bg-hover ${FOCUS}`}
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </nav>
+          </details>
+        </div>
+      </div>
+    </header>
   );
 }
