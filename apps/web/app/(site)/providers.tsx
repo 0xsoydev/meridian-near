@@ -62,23 +62,26 @@ export function Providers({ children }: { children: ReactNode }) {
   const connect = useCallback(async () => {
     const instance = connector.current;
     if (!instance) return;
-    await instance.connect();
-    const { accounts } = await instance.getConnectedWallet();
-    setAccountId(accounts[0]?.accountId ?? null);
+    const connected = await instance
+      .connect()
+      .then(() => instance.getConnectedWallet())
+      .catch(() => null);
+    if (connected) setAccountId(connected.accounts[0]?.accountId ?? null);
   }, []);
 
   const disconnect = useCallback(async () => {
     const instance = connector.current;
     if (!instance) return;
-    const wallet = await instance.wallet();
-    await instance.disconnect(wallet);
+    await instance
+      .wallet()
+      .then((wallet) => instance.disconnect(wallet))
+      .catch(() => undefined);
     setAccountId(null);
   }, []);
 
   const sign = useCallback(async (action: string, intent: Record<string, unknown> = {}) => {
     const instance = connector.current;
     if (!instance) return null;
-    const wallet = await instance.wallet();
     const recipient = window.location.host;
     const message = JSON.stringify({
       domain: recipient,
@@ -87,14 +90,19 @@ export function Providers({ children }: { children: ReactNode }) {
       ...intent,
     });
     const nonce = crypto.getRandomValues(new Uint8Array(32));
-    const signed = await wallet.signMessage({ message, recipient, nonce });
-    return {
-      account_id: signed.accountId,
-      public_key: signed.publicKey,
-      signature: signed.signature,
-      nonce: base64(nonce),
-      message,
-    };
+    try {
+      const wallet = await instance.wallet();
+      const signed = await wallet.signMessage({ message, recipient, nonce });
+      return {
+        account_id: signed.accountId,
+        public_key: signed.publicKey,
+        signature: signed.signature,
+        nonce: base64(nonce),
+        message,
+      };
+    } catch {
+      return null;
+    }
   }, []);
 
   const send = useCallback(async (transactions: NearTransaction[]) => {
