@@ -5,10 +5,15 @@ import {
   CandlestickSeries,
   CrosshairMode,
   HistogramSeries,
+  LineSeries,
   LineStyle,
+  LineType,
   createChart,
+  type IChartApi,
   type ISeriesApi,
+  type UTCTimestamp,
 } from "lightweight-charts";
+import { FOCUS } from "../../../components/kit";
 import { candlesFromPoints, type CandlePoint, type ChartPoint } from "../../../lib/price";
 
 export const INTERVALS = [
@@ -20,123 +25,140 @@ export const INTERVALS = [
 
 export type Interval = (typeof INTERVALS)[number]["value"];
 
-const UP = "#0B7D4F";
-const DOWN = "#D12A3F";
+const SPARSE = 6;
 const BAR = "rgba(23, 67, 255, 0.22)";
 
 const ohlc = ({ time, open, high, low, close }: CandlePoint) => ({ time, open, high, low, close });
-const bar = (candle: CandlePoint) => ({ time: candle.time, value: candle.volume, color: candle.volume > 0 ? BAR : "transparent" });
+
+function token(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function steps(points: ReadonlyArray<ChartPoint>): { time: UTCTimestamp; value: number }[] {
+  const out: { time: UTCTimestamp; value: number }[] = [];
+  for (const point of points) {
+    const last = out.at(-1);
+    if (last && last.time === point.time) last.value = point.value;
+    else out.push({ time: point.time, value: point.value });
+  }
+  return out;
+}
+
+export function ChartCredit() {
+  return (
+    <a
+      href="https://www.tradingview.com/"
+      target="_blank"
+      rel="noreferrer"
+      className={`hidden whitespace-nowrap text-[12px] text-muted underline decoration-transparent underline-offset-[4px] transition-[color,text-decoration-color] duration-200 ease-brand hover:text-ink hover:decoration-ink sm:inline ${FOCUS}`}
+    >
+      Charts by TradingView
+    </a>
+  );
+}
+
+type Drawn = { chart: IChartApi; candles: ISeriesApi<"Candlestick">; line: ISeriesApi<"Line">; volume: ISeriesApi<"Histogram"> };
 
 export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; bucket: number; empty: string }) {
   const host = useRef<HTMLDivElement | null>(null);
-  const candles = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volume = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const drawn = useRef<ChartPoint[]>([]);
-  const drawnBucket = useRef(bucket);
-  const drawnCandles = useRef<CandlePoint[]>([]);
+  const drawn = useRef<Drawn | null>(null);
+  const signature = useRef("");
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
+    const up = token("--color-up");
+    const down = token("--color-down");
+    const ink = token("--color-ink");
+    const accent = token("--color-accent");
+    const line = token("--color-line");
+    const control = token("--color-control");
+    const priceFormat = { type: "price" as const, precision: 4, minMove: 0.0001 };
     const chart = createChart(el, {
       autoSize: true,
       layout: {
         background: { color: "transparent" },
-        textColor: "#757575",
+        textColor: token("--color-muted"),
         fontSize: 12,
         fontFamily: getComputedStyle(el).fontFamily,
+        attributionLogo: false,
       },
-      grid: {
-        vertLines: { visible: false },
-        horzLines: { color: "rgba(30, 30, 30, 0.06)" },
-      },
-      rightPriceScale: { borderColor: "#CECECE", scaleMargins: { top: 0.1, bottom: 0.24 } },
-      timeScale: { borderColor: "#CECECE", timeVisible: true, secondsVisible: false, rightOffset: 6, barSpacing: 10 },
+      grid: { vertLines: { visible: false }, horzLines: { color: "rgba(30, 30, 30, 0.06)" } },
+      rightPriceScale: { borderColor: line, scaleMargins: { top: 0.12, bottom: 0.24 } },
+      timeScale: { borderColor: line, timeVisible: true, secondsVisible: false, rightOffset: 6, barSpacing: 10 },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "#949494", labelBackgroundColor: "#1E1E1E" },
-        horzLine: { color: "#949494", labelBackgroundColor: "#1E1E1E" },
+        vertLine: { color: control, labelBackgroundColor: ink },
+        horzLine: { color: control, labelBackgroundColor: ink },
       },
     });
-    candles.current = chart.addSeries(CandlestickSeries, {
-      upColor: UP,
-      downColor: DOWN,
-      wickUpColor: UP,
-      wickDownColor: DOWN,
+    const candles = chart.addSeries(CandlestickSeries, {
+      upColor: up,
+      downColor: down,
+      wickUpColor: up,
+      wickDownColor: down,
       borderVisible: false,
-      priceLineColor: "#1743FF",
+      priceLineColor: accent,
       priceLineStyle: LineStyle.Dashed,
       priceLineWidth: 1,
-      priceFormat: { type: "price", precision: 4, minMove: 0.0001 },
+      priceFormat,
     });
-    volume.current = chart.addSeries(HistogramSeries, {
+    const stepped = chart.addSeries(LineSeries, {
+      color: ink,
+      lineWidth: 2,
+      lineType: LineType.WithSteps,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 3,
+      priceLineColor: accent,
+      priceLineStyle: LineStyle.Dashed,
+      priceLineWidth: 1,
+      priceFormat,
+    });
+    const volume = chart.addSeries(HistogramSeries, {
       priceScaleId: "",
       priceFormat: { type: "volume" },
       lastValueVisible: false,
       priceLineVisible: false,
     });
     chart.priceScale("").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    drawn.current = [];
-    drawnCandles.current = [];
+    drawn.current = { chart, candles, line: stepped, volume };
+    signature.current = "";
     return () => {
       chart.remove();
-      candles.current = null;
-      volume.current = null;
+      drawn.current = null;
     };
   }, []);
 
   useEffect(() => {
-    const series = candles.current;
-    const bars = volume.current;
-    if (!series || !bars) return;
-    const next = candlesFromPoints(points, bucket);
-    const reshaped =
-      drawn.current.length === 0 ||
-      drawnBucket.current !== bucket ||
-      points.length < drawn.current.length ||
-      drawn.current[0]?.time !== points[0]?.time;
-    drawnBucket.current = bucket;
-
-    const previous = drawnCandles.current;
-    let same = 0;
-    while (same < previous.length && same < next.length) {
-      const before = previous[same];
-      const after = next[same];
-      if (
-        !before ||
-        !after ||
-        before.time !== after.time ||
-        before.open !== after.open ||
-        before.high !== after.high ||
-        before.low !== after.low ||
-        before.close !== after.close ||
-        before.volume !== after.volume
-      ) {
-        break;
-      }
-      same += 1;
-    }
-
-    if (reshaped || same < previous.length - 1) {
-      series.setData(next.map(ohlc));
-      bars.setData(next.map(bar));
+    const current = drawn.current;
+    if (!current) return;
+    const last = points.at(-1);
+    const key = `${bucket}:${points.length}:${points[0]?.time ?? 0}:${last?.time ?? 0}:${last?.value ?? 0}`;
+    if (key === signature.current) return;
+    signature.current = key;
+    const candles = candlesFromPoints(points, bucket);
+    const sparse = candles.length < SPARSE;
+    current.chart.applyOptions({ rightPriceScale: { visible: points.length > 0 }, timeScale: { visible: points.length > 0 } });
+    current.candles.applyOptions({ visible: !sparse });
+    current.volume.applyOptions({ visible: !sparse });
+    current.line.applyOptions({ visible: sparse });
+    if (sparse) {
+      current.candles.setData([]);
+      current.volume.setData([]);
+      current.line.setData(steps(points));
+      current.chart.timeScale().fitContent();
     } else {
-      for (const candle of next.slice(same)) {
-        series.update(ohlc(candle));
-        bars.update(bar(candle));
-      }
+      current.line.setData([]);
+      current.candles.setData(candles.map(ohlc));
+      current.volume.setData(candles.map((candle) => ({ time: candle.time, value: candle.volume, color: candle.volume > 0 ? BAR : "transparent" })));
     }
-    drawn.current = points;
-    drawnCandles.current = next;
   }, [points, bucket]);
 
   return (
     <div className="relative h-full min-h-[280px] w-full">
       <div ref={host} className="absolute inset-0" />
       {points.length === 0 ? (
-        <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[13px] text-muted">
-          {empty}
-        </p>
+        <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[13px] text-muted">{empty}</p>
       ) : null}
     </div>
   );

@@ -10,14 +10,18 @@
   --color-accent: #1743ff;
   --color-line: #cecece;
   --color-control: #949494;
-  --color-muted: #757575;
+  --color-muted: #6f6f6f;
   --color-hover: #f5f5f5;
   --color-panel: #ebebeb;
+  --color-disabled: #bdbdbd;
   --color-up: #0b7d4f;
-  --color-down: #d12a3f;
+  --color-up-hover: #096a43;
+  --color-down: #c0263a;
+  --color-down-hover: #a11f31;
   --color-up-tint: #2ebd85;
   --color-down-tint: #f6465d;
   --color-terminal: #1a1a1a;
+  --color-on-dark: #f5f5f5;
   --ease-brand: cubic-bezier(0.22, 1, 0.36, 1);
   --animate-flash: flash 700ms var(--ease-brand);
 

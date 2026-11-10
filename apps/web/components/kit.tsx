@@ -1,27 +1,34 @@
 import { ChevronDown } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
-import { CORNERS } from "./landing/hero";
 
 export const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 export const PAGE = "mx-auto flex w-full max-w-[1120px] flex-col gap-12 px-4 py-10 lg:px-6 lg:py-14";
 export const LINK = `underline decoration-line underline-offset-[5px] transition-[text-decoration-color] duration-200 ease-brand hover:decoration-accent ${FOCUS}`;
-const BOX = `inline-flex h-9 shrink-0 items-center justify-center gap-1.5 border border-control bg-white text-[13px] transition-[background-color,scale] duration-150 ease-brand hover:bg-hover active:scale-[0.96] disabled:cursor-not-allowed disabled:text-muted disabled:active:scale-100 ${FOCUS}`;
+const BOX = `inline-flex h-10 shrink-0 items-center justify-center gap-1.5 border border-control bg-white text-[13px] transition-[background-color,scale] duration-150 ease-brand enabled:hover:bg-hover enabled:active:scale-[0.96] disabled:cursor-not-allowed disabled:text-muted ${FOCUS}`;
 export const SECONDARY = `${BOX} px-3 text-ink`;
 export const DANGER = `${BOX} px-3 text-down`;
-export const ICON = `${BOX} w-9 text-ink`;
+export const ICON = `${BOX} w-10 text-ink`;
+export const CHIP = `inline-flex h-8 min-w-0 flex-1 items-center justify-center border border-line bg-white text-[12px] tabular-nums text-ink transition-[background-color,border-color,scale] duration-150 ease-brand enabled:hover:bg-hover enabled:active:scale-[0.96] disabled:cursor-not-allowed disabled:text-muted aria-pressed:border-ink aria-pressed:bg-hover ${FOCUS}`;
 const FIELD =
   "w-full border border-control bg-white text-ink placeholder:text-muted disabled:bg-hover focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-accent";
 export const INPUT = `${FIELD} h-11 px-3 text-[16px] tabular-nums lg:text-[14px]`;
-export const INPUT_SM = `${FIELD} h-9 px-2.5 text-[16px] tabular-nums lg:text-[13px]`;
+export const INPUT_SM = `${FIELD} h-10 px-2.5 text-[16px] tabular-nums lg:text-[13px]`;
 export const TH = "h-9 whitespace-nowrap px-4 text-[12px] font-normal text-muted";
 export const TD = "h-10 whitespace-nowrap px-4 text-[13px] tabular-nums text-ink";
 export const ROW = "border-t border-line transition-colors duration-150 ease-brand hover:bg-hover";
 
 const TONES = {
-  ink: "bg-ink hover:bg-accent",
-  up: "bg-up hover:bg-[#096a43]",
-  down: "bg-down hover:bg-[#b1233a]",
+  ink: ["bg-ink enabled:hover:bg-accent", "border-accent"],
+  up: ["bg-up enabled:hover:bg-up-hover", "border-up"],
+  down: ["bg-down enabled:hover:bg-down-hover", "border-down"],
 } as const;
+
+const SPOTS = [
+  "-left-[6px] -top-[6px] border-l border-t [.group:enabled:hover_&]:-translate-x-[3px] [.group:enabled:hover_&]:-translate-y-[3px]",
+  "-right-[6px] -top-[6px] border-r border-t [.group:enabled:hover_&]:translate-x-[3px] [.group:enabled:hover_&]:-translate-y-[3px]",
+  "-bottom-[6px] -left-[6px] border-b border-l [.group:enabled:hover_&]:-translate-x-[3px] [.group:enabled:hover_&]:translate-y-[3px]",
+  "-bottom-[6px] -right-[6px] border-b border-r [.group:enabled:hover_&]:translate-x-[3px] [.group:enabled:hover_&]:translate-y-[3px]",
+];
 
 export function CommitButton({
   tone = "ink",
@@ -30,21 +37,30 @@ export function CommitButton({
   children,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: keyof typeof TONES }) {
+  const [fill, corner] = TONES[tone];
   return (
     <button
       type={type}
       {...props}
-      className={`group relative inline-flex h-11 items-center justify-center px-6 text-[15px] text-white transition-[background-color,scale] duration-200 ease-brand active:scale-[0.96] disabled:cursor-not-allowed disabled:bg-[#bdbdbd] disabled:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-[10px] focus-visible:outline-accent motion-reduce:transition-none ${TONES[tone]} ${className}`}
+      className={`group relative inline-flex h-[46px] items-center justify-center gap-2 px-9 text-[16px] text-white transition-[background-color,scale] duration-200 ease-brand enabled:active:scale-[0.96] disabled:cursor-not-allowed disabled:bg-disabled focus-visible:outline-2 focus-visible:outline-offset-[10px] focus-visible:outline-accent motion-reduce:transition-none ${fill} ${className}`}
     >
-      {CORNERS.map((corner) => (
+      {SPOTS.map((spot) => (
         <span
-          key={corner}
+          key={spot}
           aria-hidden
-          className={`${corner} group-disabled:translate-x-0 group-disabled:translate-y-0 group-disabled:border-control`}
+          className={`absolute size-[10px] transition-transform duration-200 ease-brand motion-reduce:transition-none [.group:disabled_&]:border-control ${corner} ${spot}`}
         />
       ))}
       {children}
     </button>
+  );
+}
+
+export function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center border border-line px-1 font-sans text-[12px] leading-none text-muted no-underline">
+      {children}
+    </kbd>
   );
 }
 
@@ -59,7 +75,7 @@ export function Toggle<T extends string>({
   label: string;
   value: T;
   onChange: (value: T) => void;
-  items: ReadonlyArray<{ value: T; label: string; tone?: "up" | "down" }>;
+  items: ReadonlyArray<{ value: T; label: string; tone?: "up" | "down"; hotkey?: string }>;
   big?: boolean;
   className?: string;
 }) {
@@ -78,9 +94,53 @@ export function Toggle<T extends string>({
             key={item.value}
             type="button"
             aria-pressed={active}
+            aria-keyshortcuts={item.hotkey}
             onClick={() => onChange(item.value)}
-            className={`${big ? "h-10 text-[16px]" : "h-9 text-[13px]"} whitespace-nowrap underline underline-offset-[6px] transition-[color,text-decoration-color] duration-200 ease-brand ${FOCUS} ${
+            className={`${big ? "text-[16px]" : "text-[13px]"} inline-flex h-10 items-center gap-2 whitespace-nowrap transition-[color] duration-200 ease-brand ${FOCUS} ${
               active ? on : "text-muted decoration-transparent hover:text-ink"
+            }`}
+          >
+            <span className="underline decoration-inherit underline-offset-[6px] transition-[text-decoration-color] duration-200 ease-brand">
+              {item.label}
+            </span>
+            {item.hotkey ? (
+              <span className="hidden lg:inline-flex">
+                <Kbd>{item.hotkey}</Kbd>
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function MobileTabs<T extends string>({
+  value,
+  onChange,
+  items,
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  items: ReadonlyArray<{ value: T; label: string }>;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Sections"
+      className="fixed inset-x-0 bottom-0 z-40 grid border-t border-line bg-white lg:hidden"
+      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+    >
+      {items.map((item) => {
+        const active = item.value === value;
+        return (
+          <button
+            key={item.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(item.value)}
+            className={`h-[52px] text-[14px] transition-[color,box-shadow] duration-200 ease-brand ${FOCUS} ${
+              active ? "text-ink shadow-[inset_0_2px_0_var(--color-accent)]" : "text-muted"
             }`}
           >
             {item.label}
@@ -208,11 +268,21 @@ export function PageHeader({ title, aside, children }: { title: string; aside?: 
   );
 }
 
-export function Stat({ label, tone, children }: { label: string; tone?: "up" | "down" | undefined; children: ReactNode }) {
+export function Stat({
+  label,
+  tone,
+  className = "",
+  children,
+}: {
+  label: string;
+  tone?: "up" | "down" | undefined;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex shrink-0 flex-col gap-0.5">
-      <dt className="whitespace-nowrap text-[12px] text-muted">{label}</dt>
-      <dd className={`whitespace-nowrap text-[13px] tabular-nums ${tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-ink"}`}>
+    <div className={`flex min-w-0 flex-col gap-0.5 lg:shrink-0 ${className}`}>
+      <dt className="truncate text-[12px] text-muted">{label}</dt>
+      <dd className={`truncate text-[13px] tabular-nums ${tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-ink"}`}>
         {children}
       </dd>
     </div>
