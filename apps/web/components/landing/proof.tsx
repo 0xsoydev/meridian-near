@@ -170,14 +170,18 @@ function Reading({ label, value, on }: { label: string; value: string; on: boole
   return (
     <div className="flex flex-col gap-0.5 border-b border-line/70 pb-2">
       <span className="text-[12px] leading-[18px] text-muted">{label}</span>
-      <motion.span
-        className="text-[20px] leading-7 tabular-nums text-ink"
-        initial={false}
-        animate={{ opacity: on ? 1 : 0.15 }}
-        transition={{ duration: 0.5, ease: EASE }}
-      >
-        {on ? value : "$0.0000"}
-      </motion.span>
+      {on ? (
+        <motion.span
+          className="text-[20px] leading-7 tabular-nums text-ink"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, ease: EASE }}
+        >
+          {value}
+        </motion.span>
+      ) : (
+        <span className="my-1.5 block h-4 w-24 bg-line/50" />
+      )}
     </div>
   );
 }
