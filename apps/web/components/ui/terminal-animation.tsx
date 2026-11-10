@@ -42,6 +42,8 @@ export function TerminalAnimationRoot({
   activeTab,
   onActiveTabChange,
   onComplete,
+  onProgress,
+  primed = false,
   className,
   children,
 }: {
@@ -49,6 +51,8 @@ export function TerminalAnimationRoot({
   activeTab: number;
   onActiveTabChange: (index: number) => void;
   onComplete?: () => void;
+  onProgress?: (tab: number, lines: number) => void;
+  primed?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -60,10 +64,16 @@ export function TerminalAnimationRoot({
   const [showCursor, setShowCursor] = useState(true);
   const timeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
   const completed = useRef(onComplete);
+  const ready = useRef(primed);
+  const [linesTab, setLinesTab] = useState(activeTab);
 
   useEffect(() => {
     completed.current = onComplete;
   });
+
+  useEffect(() => {
+    if (linesTab === activeTab) onProgress?.(activeTab, isTypingCommand ? 0 : visibleLines);
+  }, [onProgress, activeTab, linesTab, isTypingCommand, visibleLines]);
 
   useEffect(() => {
     const element = root.current;
@@ -89,6 +99,7 @@ export function TerminalAnimationRoot({
     clearTimeouts();
     const tab = tabs[activeTab];
     if (!tab) return;
+    setLinesTab(activeTab);
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setCommandTyped(tab.command);
       setIsTypingCommand(false);
@@ -96,9 +107,10 @@ export function TerminalAnimationRoot({
       setShowCursor(false);
       return;
     }
+    const skip = ready.current;
     setVisibleLines(0);
-    setCommandTyped("");
-    setIsTypingCommand(true);
+    setCommandTyped(skip ? tab.command : "");
+    setIsTypingCommand(!skip);
     setShowCursor(true);
     if (!started) return;
 
@@ -119,7 +131,7 @@ export function TerminalAnimationRoot({
       if (charIndex <= tab.command.length) {
         setCommandTyped(tab.command.slice(0, charIndex));
         charIndex++;
-        later(typeCommand, 25 + Math.random() * 35);
+        later(typeCommand, 14 + Math.random() * 20);
         return;
       }
       later(() => {
@@ -127,7 +139,12 @@ export function TerminalAnimationRoot({
         showLines(0);
       }, 250);
     };
-    later(typeCommand, 300);
+    if (skip) {
+      ready.current = false;
+      later(() => showLines(0), 500);
+    } else {
+      later(typeCommand, 300);
+    }
     return clearTimeouts;
   }, [activeTab, started, tabs, clearTimeouts]);
 

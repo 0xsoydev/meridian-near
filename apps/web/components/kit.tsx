@@ -57,6 +57,10 @@ export function CommitButton({
   );
 }
 
+export function Brackets() {
+  return SPOTS.map((spot) => <span key={spot} aria-hidden className={`absolute size-[10px] border-accent ${spot}`} />);
+}
+
 export function CommitLink({ href, className = "", children }: { href: string; className?: string; children: ReactNode }) {
   return (
     <Link

@@ -36,6 +36,7 @@ export function AnimatedBeam({
   fromRef,
   toRef,
   axis,
+  idle = true,
   active = true,
   reverse = false,
 }: {
@@ -43,6 +44,7 @@ export function AnimatedBeam({
   fromRef: RefObject<HTMLElement | null>;
   toRef: RefObject<HTMLElement | null>;
   axis?: "x" | "y";
+  idle?: boolean;
   active?: boolean;
   reverse?: boolean;
 }) {
@@ -75,6 +77,8 @@ export function AnimatedBeam({
     update();
     return () => observer.disconnect();
   }, [containerRef, fromRef, toRef, axis]);
+
+  if (!active && !idle) return null;
 
   return (
     <svg
