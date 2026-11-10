@@ -1,12 +1,14 @@
 import { AgentsTerminal } from "../components/landing/agents-terminal";
+import { Capacity } from "../components/landing/capacity";
 import { LandingHeader } from "../components/landing/header";
 import { Hedge } from "../components/landing/hedge";
 import { Hero } from "../components/landing/hero";
 import { Limit } from "../components/landing/limit";
-import { Markets } from "../components/landing/markets";
 import { Proof } from "../components/landing/proof";
+import { RequestStory } from "../components/landing/request-story";
 import { SiteFooter } from "../components/landing/site-footer";
 import { Story } from "../components/landing/story";
+import { WaysIn } from "../components/landing/ways-in";
 
 const HOST = (process.env.PUBLIC_HOST ?? "http://localhost:3000").replace(/\/+$/, "");
 
@@ -17,11 +19,13 @@ export default function Home() {
       <main>
         <Hero />
         <Story />
-        <Markets />
+        <Capacity />
+        <RequestStory />
         <Limit />
         <Hedge />
         <Proof />
         <AgentsTerminal variant="section" host={HOST} />
+        <WaysIn />
       </main>
       <SiteFooter />
     </div>
