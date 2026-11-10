@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function SellPage() {
   const rails = await catalog().catch(() => []);
   const offered = rails
-    .filter((rail) => rail.enabled && rail.id !== "near-ai")
+    .filter((rail) => rail.enabled)
     .map((rail) => ({
       id: rail.id,
       models: rail.models

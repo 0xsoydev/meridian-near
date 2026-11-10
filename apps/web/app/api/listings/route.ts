@@ -163,7 +163,6 @@ export async function POST(request: Request): Promise<Response> {
 
   const intent = intentSchema.safeParse(verified.intent);
   if (!intent.success) return fail(400, "invalid_request", "invalid listing intent");
-  if (intent.data.rail === "near-ai") return fail(400, "invalid_request", "the house rail is not for sale");
 
   const seller = await ensureAccount(verified.account);
 

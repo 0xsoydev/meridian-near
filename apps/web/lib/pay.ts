@@ -79,7 +79,7 @@ function maxBig(a: bigint, b: bigint): bigint {
 
 async function blocked(kind: "cap" | "wallet", key: KeyRow, needMicro: bigint): Promise<Response> {
   const host = (process.env.PUBLIC_HOST ?? "http://localhost:3000").replace(/\/+$/, "");
-  const url = `${host}/keys?key=${key.id}`;
+  const url = `${host}/wallet?key=${key.id}`;
   const qr = await QRCode.toString(url, { type: "utf8" });
   const name = key.name ?? "this key";
   const message =
