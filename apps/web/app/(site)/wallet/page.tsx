@@ -648,8 +648,8 @@ export default function WalletPage() {
                     <Cell label="Key balance">{usd(BigInt(key.float_usd_micro))}</Cell>
                     <Cell label="Spent today">
                       {key.cap ? (
-                        <span className="inline-flex items-center gap-2">
-                          <span aria-hidden className="relative h-1 w-14 bg-hover">
+                        <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                          <span aria-hidden className="relative h-1 w-10 shrink-0 bg-hover">
                             <span className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${width}%` }} />
                           </span>
                           {usd(used)} of {usd(per)}
