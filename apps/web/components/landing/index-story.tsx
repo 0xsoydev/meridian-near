@@ -1,11 +1,11 @@
 "use client";
 
 import { RotateCcw } from "lucide-react";
-import { motion, useInView, useReducedMotion } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useEffect, useRef, useState } from "react";
 import { FOCUS } from "../kit";
+import { EASE, usePlayOnce } from "./play";
 
-const EASE = [0.22, 1, 0.36, 1] as const;
 const LOW = 0.1755;
 const HIGH = 0.1945;
 const ODD = 7;
@@ -30,13 +30,9 @@ const STEPS = ["Fills land in their minute", "Each minute gets one price", "The 
 const BEATS = [200, 1700, 2800, 4000];
 
 export function IndexStory() {
-  const figure = useRef<HTMLDivElement>(null);
+  const { ref: figure, phase, play, reduced, done } = usePlayOnce(BEATS, 0.4);
   const plot = useRef<HTMLDivElement>(null);
-  const seen = useInView(figure, { once: true, amount: 0.4 });
-  const reduced = useReducedMotion();
   const [width, setWidth] = useState(0);
-  const [phase, setPhase] = useState(0);
-  const timers = useRef<number[]>([]);
 
   useEffect(() => {
     const element = plot.current;
@@ -47,22 +43,8 @@ export function IndexStory() {
     return () => observer.disconnect();
   }, []);
 
-  const play = useCallback(() => {
-    for (const timer of timers.current) window.clearTimeout(timer);
-    setPhase(0);
-    timers.current = BEATS.map((at, index) => window.setTimeout(() => setPhase(index + 1), at));
-  }, []);
-
-  useEffect(() => {
-    if (reduced) setPhase(4);
-    else if (seen) play();
-    return () => {
-      for (const timer of timers.current) window.clearTimeout(timer);
-    };
-  }, [seen, reduced, play]);
-
   const narrow = width < 640;
-  const height = narrow ? 260 : 340;
+  const height = narrow ? 300 : 360;
   const right = narrow ? 52 : 68;
   const top = 24;
   const bottom = 32;
@@ -73,7 +55,7 @@ export function IndexStory() {
   const grid = [0.18, 0.185, 0.19];
 
   return (
-    <section className="border-t border-line px-6 py-20 lg:px-12 lg:py-28">
+    <section className="border-t border-line px-6 py-20 lg:px-12 lg:py-24">
       <h2 className="max-w-[18ch] text-balance font-serif text-[40px] leading-[1.04] tracking-[-0.01em] text-ink lg:text-[60px]">
         One public price for inference.
       </h2>
@@ -108,12 +90,12 @@ export function IndexStory() {
                   <motion.circle
                     key={`${bucket}-${position}`}
                     cx={x(bucket) + (position - (fills.length - 1) / 2) * Math.min(9, span / 5)}
-                    r={2 + Math.sqrt(size) * (narrow ? 0.9 : 1.2)}
+                    r={2.5 + Math.sqrt(size) * (narrow ? 1.1 : 1.4)}
                     fill={bucket === ODD && price > 0.19 ? "var(--color-down)" : "var(--color-ink)"}
                     initial={false}
                     animate={{
                       cy: phase >= 1 ? y(price) : y(price) - 36,
-                      opacity: phase === 0 ? 0 : phase === 1 ? 0.9 : 0.35,
+                      opacity: phase === 0 ? 0 : phase === 1 || (bucket === ODD && price > 0.19) ? 0.9 : 0.4,
                     }}
                     transition={{ duration: 0.55, ease: EASE, delay: phase === 1 ? bucket * 0.07 + position * 0.03 : 0 }}
                   />
@@ -127,7 +109,7 @@ export function IndexStory() {
                   y1={y(price)}
                   y2={y(price)}
                   stroke="var(--color-ink)"
-                  strokeWidth={2}
+                  strokeWidth={3}
                   initial={false}
                   animate={{ opacity: phase >= 2 ? 1 : 0, pathLength: phase >= 2 ? 1 : 0 }}
                   transition={{ duration: 0.45, ease: EASE, delay: phase === 2 ? bucket * 0.05 : 0 }}
@@ -142,6 +124,28 @@ export function IndexStory() {
                 animate={{ opacity: phase >= 2 ? 1 : 0 }}
               >
                 One odd trade
+              </motion.text>
+              <motion.text
+                x={x(5)}
+                y={y(VWAP[5] ?? 0) + 26}
+                fontSize={12}
+                textAnchor="middle"
+                fill="var(--color-ink)"
+                initial={false}
+                animate={{ opacity: phase >= 2 ? 1 : 0 }}
+              >
+                Minute price
+              </motion.text>
+              <motion.text
+                x={x(10)}
+                y={y(INDEX[10] ?? 0) - 14}
+                fontSize={12}
+                textAnchor="middle"
+                fill="var(--color-accent)"
+                initial={false}
+                animate={{ opacity: phase >= 3 ? 1 : 0 }}
+              >
+                Index
               </motion.text>
               <motion.path
                 d={line}
@@ -179,7 +183,7 @@ export function IndexStory() {
               </li>
             ))}
           </ol>
-          {phase >= 4 && !reduced ? (
+          {done && !reduced ? (
             <button
               type="button"
               onClick={play}

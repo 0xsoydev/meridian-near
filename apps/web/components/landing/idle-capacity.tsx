@@ -1,12 +1,11 @@
 "use client";
 
 import { RotateCcw } from "lucide-react";
-import { LayoutGroup, motion, useInView, useReducedMotion } from "motion/react";
+import { LayoutGroup, motion } from "motion/react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { FOCUS, LINK } from "../kit";
+import { EASE, usePlayOnce } from "./play";
 
-const EASE = [0.22, 1, 0.36, 1] as const;
 const HATCH = "repeating-linear-gradient(135deg, var(--color-line) 0 1px, transparent 1px 7px)";
 const ASKS = [
   { price: "0.1840", size: "25" },
@@ -14,56 +13,47 @@ const ASKS = [
   { price: "0.2150", size: "40" },
 ];
 const BEATS = [700, 1700, 2700];
+const FACTS = [
+  { title: "You set the price", body: "At or under the provider's list price. The lowest ask fills first." },
+  { title: "Your key stays sealed", body: "Stored encrypted and opened only to serve a buyer's request." },
+  { title: "Paid in USDC every day", body: "Earnings, minus the 10% venue fee, land in your NEAR account." },
+];
 
-export function ExpiringCredit() {
-  const figure = useRef<HTMLDivElement>(null);
-  const seen = useInView(figure, { once: true, amount: 0.5 });
-  const reduced = useReducedMotion();
-  const [phase, setPhase] = useState(0);
-  const timers = useRef<number[]>([]);
-
-  const play = useCallback(() => {
-    for (const timer of timers.current) window.clearTimeout(timer);
-    setPhase(0);
-    timers.current = BEATS.map((at, index) => window.setTimeout(() => setPhase(index + 1), at));
-  }, []);
-
-  useEffect(() => {
-    if (reduced) setPhase(3);
-    else if (seen) play();
-    return () => {
-      for (const timer of timers.current) window.clearTimeout(timer);
-    };
-  }, [seen, reduced, play]);
-
+export function IdleCapacity() {
+  const { ref, phase, play, reduced, done } = usePlayOnce(BEATS, 0.5);
   const listed = phase >= 2;
 
   return (
-    <section className="grid gap-12 border-t border-line px-6 py-20 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-20 lg:px-12 lg:py-28">
-      <div className="flex flex-col items-start gap-6 lg:pt-4">
-        <h2 className="max-w-[14ch] text-balance font-serif text-[40px] leading-[1.04] tracking-[-0.01em] text-ink lg:text-[60px]">
-          Credit you won&apos;t use gets a price.
+    <section className="grid gap-12 border-t border-line px-6 py-20 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-20 lg:px-12 lg:py-24">
+      <div className="flex flex-col items-start gap-6 lg:self-center">
+        <h2 className="max-w-[15ch] text-balance font-serif text-[40px] leading-[1.04] tracking-[-0.01em] text-ink lg:text-[60px]">
+          Capacity you won&apos;t use gets a price.
         </h2>
         <p className="max-w-[46ch] text-pretty text-[17px] leading-[27px] text-ink">
-          Provider plans reset every month, and what you didn&apos;t use is gone. List the rest on Meridian below the provider&apos;s list price. Agents
-          buy it through the router, and your key stays sealed: only their requests ever run on it.
+          Prepaid balances, startup credits, hackathon credits: most teams hold more model access than their own work uses. List the idle part on
+          Meridian, under the provider&apos;s list price, and agents buy it through the router.
         </p>
+        <dl className="mt-2 flex flex-col gap-4">
+          {FACTS.map((fact) => (
+            <div key={fact.title} className="flex flex-col gap-0.5">
+              <dt className="text-[16px] leading-[24px] text-ink">{fact.title}</dt>
+              <dd className="max-w-[44ch] text-[15px] leading-[23px] text-muted">{fact.body}</dd>
+            </div>
+          ))}
+        </dl>
         <Link href="/sell" className={`${LINK} flex h-11 items-center text-[16px] text-ink`}>
           Sell spare capacity
         </Link>
       </div>
 
-      <figure ref={figure} className="flex flex-col border border-line bg-white p-5 sm:p-8">
+      <figure ref={ref} className="flex flex-col border border-line bg-white p-5 sm:p-8">
         <figcaption className="sr-only">
-          A plan of 100 MTok with 58 used and 42 left before it resets. The 42 MTok are listed at $0.18 per MTok, 55% under the list price, and become
-          the cheapest ask in the glm-5.3 book.
+          An OpenRouter credit worth about 100 MTok of glm-5.3. Your own work uses 58 MTok, so 42 MTok sit idle. Listed at $0.18 per MTok, 55% under the
+          list price, they become the cheapest ask in the glm-5.3 book.
         </figcaption>
         <LayoutGroup>
           <div aria-hidden className="flex flex-col">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[13px]">
-              <span className="text-ink">Your OpenRouter plan, 100 MTok a month</span>
-              <span className="tabular-nums text-muted">Resets in 6 days</span>
-            </div>
+            <p className="text-[13px] text-ink">Your OpenRouter credit, about 100 MTok of glm-5.3</p>
             <div className="relative mt-3 flex h-12">
               <div className="h-full w-[58%] bg-ink" />
               <div className="relative h-full w-[42%] border border-l-0 border-line" style={{ backgroundImage: HATCH }}>
@@ -86,14 +76,14 @@ export function ExpiringCredit() {
               </div>
               <motion.span
                 className="absolute -bottom-3 -top-3 left-[58%] w-0.5 -translate-x-1/2 origin-top bg-accent"
-                initial={{ scaleY: 0 }}
+                initial={false}
                 animate={{ scaleY: phase >= 1 ? 1 : 0 }}
                 transition={{ duration: 0.6, ease: EASE }}
               />
             </div>
             <div className="mt-3 flex justify-between gap-4 text-[12px] tabular-nums">
-              <span className="text-ink">58 MTok used</span>
-              <span className={phase >= 1 ? "text-accent" : "text-muted"}>42 MTok left over</span>
+              <span className="text-ink">58 MTok your work uses</span>
+              <span className={phase >= 1 ? "text-accent" : "text-muted"}>42 MTok sitting idle</span>
             </div>
 
             <div className="mt-10 border border-line">
@@ -137,15 +127,10 @@ export function ExpiringCredit() {
           </div>
         </LayoutGroup>
         <div className="mt-5 flex min-h-10 items-center justify-between gap-4">
-          <motion.p
-            aria-hidden
-            initial={{ opacity: 0 }}
-            animate={{ opacity: phase >= 3 ? 1 : 0 }}
-            className="text-[13px] leading-[20px] text-ink"
-          >
+          <motion.p aria-hidden initial={false} animate={{ opacity: phase >= 3 ? 1 : 0 }} className="text-[13px] leading-[20px] text-ink">
             55% under list. The lowest ask fills first.
           </motion.p>
-          {phase >= 3 && !reduced ? (
+          {done && !reduced ? (
             <button
               type="button"
               onClick={play}

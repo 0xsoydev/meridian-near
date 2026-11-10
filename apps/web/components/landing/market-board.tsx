@@ -16,6 +16,9 @@ function price(micro: string | null | undefined): string {
   return micro ? (Number(micro) / 1_000_000).toFixed(4) : "----";
 }
 
+const FLAP = "text-[17px] sm:text-[20px]";
+const NONE = "text-[13px] text-[#a3a3a3]";
+
 function versus(ask: string | null | undefined, list: string | undefined): string {
   if (!ask || !list || list === "0") return "----";
   const change = Math.round(((Number(ask) - Number(list)) / Number(list)) * 100);
@@ -45,6 +48,7 @@ export function MarketBoard() {
   }, []);
 
   const posted = status?.keeper_last_post_s ?? null;
+  const loaded = status !== null && models.length > 0;
 
   return (
     <div className="w-full max-w-[720px] bg-ink text-left text-on-dark">
@@ -74,9 +78,10 @@ export function MarketBoard() {
             const market = status?.markets.find((entry) => entry.model === model);
             const listed = models.find((entry) => entry.id === model);
             const change = versus(listed?.best_ask_micro_per_mtok, listed?.reference_blended_micro_per_mtok);
+            const quiet = loaded && !market?.index_micro_per_mtok && !listed?.best_ask_micro_per_mtok;
             return (
               <tr key={model} className="border-t border-white/10 transition-colors duration-150 ease-brand hover:bg-white/5">
-                <th scope="row" className="py-3 pl-4 text-left font-normal sm:pl-5">
+                <th scope="row" className="whitespace-nowrap py-3 pl-4 text-left font-normal sm:pl-5">
                   <Link
                     href={`/trade?model=${encodeURIComponent(model)}`}
                     className={`text-[14px] underline decoration-transparent underline-offset-[5px] transition-[text-decoration-color] duration-200 ease-brand hover:decoration-on-dark sm:text-[15px] ${FOCUS}`}
@@ -84,21 +89,49 @@ export function MarketBoard() {
                     {model}
                   </Link>
                 </th>
-                <td className="px-3 py-3 text-right">
-                  <SplitFlap text={price(market?.index_micro_per_mtok)} length={6} delay={row * 120} className="text-[17px] sm:text-[20px]" />
-                </td>
-                <td className="hidden px-3 py-3 text-right sm:table-cell">
-                  <SplitFlap text={price(listed?.best_ask_micro_per_mtok)} length={6} delay={row * 120 + 80} className="text-[17px] sm:text-[20px]" />
-                </td>
-                <td className="py-3 pr-4 text-right sm:pr-5">
-                  <SplitFlap
-                    text={change}
-                    length={4}
-                    delay={row * 120 + 160}
-                    className="text-[17px] sm:text-[20px]"
-                    tileClassName={change.startsWith("-") ? "text-up-tint" : undefined}
-                  />
-                </td>
+                {quiet ? (
+                  <td colSpan={3} className="h-[54px] py-3 pr-4 text-right text-[13px] text-[#a3a3a3] sm:pr-5">
+                    <span className="hidden sm:inline">No trades yet. </span>
+                    <Link
+                      href="/sell"
+                      className={`text-on-dark underline decoration-white/30 underline-offset-[5px] transition-[text-decoration-color] duration-200 ease-brand hover:decoration-on-dark ${FOCUS}`}
+                    >
+                      List the first ask
+                    </Link>
+                  </td>
+                ) : (
+                  <>
+                    <td className="px-3 py-3 text-right">
+                      {loaded && !market?.index_micro_per_mtok ? (
+                        <span className={NONE}>Not posted</span>
+                      ) : (
+                        <SplitFlap text={loaded ? price(market?.index_micro_per_mtok) : ""} length={6} delay={row * 120} className={FLAP} />
+                      )}
+                    </td>
+                    <td className="hidden px-3 py-3 text-right sm:table-cell">
+                      {loaded && !listed?.best_ask_micro_per_mtok ? (
+                        <span className={NONE}>No asks</span>
+                      ) : (
+                        <SplitFlap text={loaded ? price(listed?.best_ask_micro_per_mtok) : ""} length={6} delay={row * 120 + 80} className={FLAP} />
+                      )}
+                    </td>
+                    <td className="py-3 pr-4 text-right sm:pr-5">
+                      {loaded && change === "----" ? (
+                        <span className={NONE}>
+                          <span className="sm:hidden">No asks</span>
+                        </span>
+                      ) : (
+                        <SplitFlap
+                          text={loaded ? change : ""}
+                          length={4}
+                          delay={row * 120 + 160}
+                          className={FLAP}
+                          tileClassName={change.startsWith("-") ? "text-up-tint" : undefined}
+                        />
+                      )}
+                    </td>
+                  </>
+                )}
               </tr>
             );
           })}

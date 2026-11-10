@@ -347,7 +347,7 @@ The agent holds no NEAR key:
 
 | Page | Contents |
 |---|---|
-| `/` | a live board (index, best ask and discount per market from `/api/v1/status` and `/api/v1/models`), then animated sections: unused credit becoming an ask, one request from limit to seller payout, the device approval beside the agent terminal, how fills become the index, a receipt of the venue's current state, and real screenshots of `/agents`, `/sell` and `/perps`; every animation shows its final frame under reduced motion |
+| `/` | a live board (index, best ask and discount per market from `/api/v1/status` and `/api/v1/models`), then animated sections: idle prepaid credit becoming the cheapest ask, one request from limit to seller payout, the device approval beside the agent terminal, how fills become the index, a receipt of the venue's current state, and real screenshots of `/agents`, `/sell` and `/perps`; every animation shows its final frame under reduced motion |
 | `/agents` | the terminal guide: `skill.md`, the device flow, demo keys, what an agent can and cannot do |
 | `/a/[code]` | approve an agent or a higher limit: name, limit, wallet, one prompt to fund and approve, or deny |
 | `/wallet` | the Meridian wallet (deposit, withdraw, any chain), agents and keys behind one `list_keys` signature reused for four minutes (limit, used, float, raise, revoke), create a key and set its limit, recent requests |

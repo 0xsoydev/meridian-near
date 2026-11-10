@@ -6,11 +6,13 @@ export function Hero() {
   return (
     <section className="relative isolate overflow-hidden">
       <img
-        src="/images/colosseum.webp"
+        src="/images/colosseum-2000.webp"
+        srcSet="/images/colosseum-1000.webp 1000w, /images/colosseum-2000.webp 2000w"
+        sizes="100vw"
         alt=""
         aria-hidden
-        width={3456}
-        height={2368}
+        width={2000}
+        height={1370}
         fetchPriority="high"
         className="absolute inset-x-0 top-0 -z-20 h-full w-full animate-unveil object-cover object-[50%_18%] [filter:brightness(112%)_contrast(92%)] [mask-image:linear-gradient(#000_70%,transparent)] motion-reduce:animate-none lg:object-top"
       />

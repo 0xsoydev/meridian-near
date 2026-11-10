@@ -3,8 +3,8 @@
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { CommitLink, FOCUS } from "../kit";
+import { EASE } from "./play";
 
-const EASE = [0.22, 1, 0.36, 1] as const;
 const WAYS = [
   {
     id: "agents",
@@ -14,6 +14,7 @@ const WAYS = [
     href: "/agents",
     cta: "Connect an agent",
     shot: "/images/landing/agents.webp",
+    focus: "object-left-top",
     path: "/agents",
   },
   {
@@ -24,6 +25,7 @@ const WAYS = [
     href: "/sell",
     cta: "Sell spare capacity",
     shot: "/images/landing/sell.webp",
+    focus: "object-left-top",
     path: "/sell",
   },
   {
@@ -34,6 +36,7 @@ const WAYS = [
     href: "/perps",
     cta: "Open perps",
     shot: "/images/landing/perps.webp",
+    focus: "object-right-top",
     path: "/perps",
   },
 ] as const;
@@ -54,7 +57,7 @@ export function WaysIn() {
   };
 
   return (
-    <section className="border-t border-line px-6 py-20 lg:px-12 lg:py-28">
+    <section className="border-t border-line px-6 py-20 lg:px-12 lg:py-24">
       <h2 className="font-serif text-[40px] leading-[1.04] tracking-[-0.01em] text-ink lg:text-[60px]">Three ways in.</h2>
       <div role="tablist" aria-label="Ways to use Meridian" onKeyDown={onKey} className="mt-8 flex gap-x-5 overflow-x-auto whitespace-nowrap border-b border-line sm:gap-x-8">
         {WAYS.map((item, index) => (
@@ -99,12 +102,12 @@ export function WaysIn() {
 
         <div className="relative px-4 pb-10 sm:px-10 sm:pb-16">
           <img
-            src="/images/panorama.webp"
+            src="/images/panorama-1600.webp"
             alt=""
             aria-hidden
             loading="lazy"
-            width={2172}
-            height={724}
+            width={1600}
+            height={533}
             className="absolute inset-x-0 bottom-0 h-[72%] w-full object-cover object-[50%_60%] grayscale"
           />
           <div className="relative border border-line bg-white">
@@ -118,20 +121,20 @@ export function WaysIn() {
                 meridian{way.path}
               </span>
             </div>
-            <div className="relative aspect-[16/10] overflow-hidden bg-white">
+            <div className="relative aspect-[4/5] overflow-hidden bg-white sm:aspect-[16/10]">
               <AnimatePresence initial={false}>
                 <motion.img
                   key={way.shot}
                   src={way.shot}
                   alt={`Meridian's ${way.path} page`}
-                  width={1440}
-                  height={900}
+                  width={1800}
+                  height={1124}
                   loading="lazy"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.3, ease: EASE }}
-                  className="absolute inset-0 size-full object-cover object-top"
+                  className={`absolute inset-0 size-full object-cover ${way.focus}`}
                 />
               </AnimatePresence>
             </div>

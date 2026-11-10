@@ -3,12 +3,13 @@
 import { motion, useInView, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ago, api } from "../../lib/client";
+import { ago, api, explorer } from "../../lib/client";
 import type { VenueStatus } from "../../lib/types";
 import { statusSchema } from "../../lib/wire";
 import { LINK } from "../kit";
+import { EASE } from "./play";
 
-const EASE = [0.22, 1, 0.36, 1] as const;
+const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
 const TEETH = 18;
 const EDGE = `polygon(0 0, 100% 0, 100% calc(100% - 8px), ${Array.from({ length: TEETH }, (_, tooth) => {
   const step = 100 / TEETH;
@@ -41,9 +42,13 @@ export function Proof() {
     setStamp(new Date().toISOString().slice(0, 16).replace("T", " "));
   }, []);
 
+  const quiet = status?.markets.filter((market) => !market.index_micro_per_mtok).length ?? 0;
   const lines: Array<[string, string]> = status
     ? [
-        ...status.markets.map((market): [string, string] => [`${market.model} index`, price(market.index_micro_per_mtok)]),
+        ...status.markets
+          .filter((market) => market.index_micro_per_mtok)
+          .map((market): [string, string] => [`${market.model} index`, price(market.index_micro_per_mtok)]),
+        ...(quiet > 0 ? [["Waiting for a first trade", `${quiet} ${quiet === 1 ? "market" : "markets"}`] as [string, string]] : []),
         ["Last index post", status.keeper_last_post_s === null ? "none yet" : ago(status.keeper_last_post_s)],
         ["Fills, last 24 h", status.venue.fills_24h.toString()],
         ["Asks on the book", status.venue.open_asks.toString()],
@@ -53,7 +58,7 @@ export function Proof() {
   const printing = (seen || reduced) && status !== null;
 
   return (
-    <section className="grid gap-14 border-t border-line px-6 py-20 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-20 lg:px-12 lg:py-28">
+    <section className="grid gap-14 border-t border-line px-6 py-20 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-20 lg:px-12 lg:py-24">
       <div className="flex flex-col items-center gap-0 lg:items-start">
         <h2 className="mb-12 max-w-[16ch] self-start text-balance font-serif text-[40px] leading-[1.04] tracking-[-0.01em] text-ink lg:text-[60px]">
           Proof over marketing.
@@ -87,6 +92,19 @@ export function Proof() {
                 </motion.div>
               ))}
             </dl>
+            {CORE ? (
+              <motion.div
+                initial={false}
+                animate={{ opacity: printing ? 1 : 0 }}
+                transition={{ delay: reduced ? 0 : 0.5 + lines.length * 0.12, duration: 0.25 }}
+                className="mt-2 flex items-baseline justify-between gap-4"
+              >
+                <span>Contract</span>
+                <a href={explorer("address", CORE)} target="_blank" rel="noreferrer" className={`${LINK} min-w-0 truncate text-ink`}>
+                  {CORE}
+                </a>
+              </motion.div>
+            ) : null}
             <div className="mt-6 border-t-2 border-dashed border-accent pt-4">
               <Link href="/receipts" className={`${LINK} text-[14px] text-ink`}>
                 Recompute the index yourself

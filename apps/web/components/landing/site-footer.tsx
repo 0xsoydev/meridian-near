@@ -28,7 +28,7 @@ const GROUPS = [
 export function SiteFooter() {
   return (
     <footer className="relative isolate overflow-hidden border-t border-line bg-panel">
-      <div className="mx-auto grid max-w-[1520px] gap-12 px-6 pb-[260px] pt-16 sm:pb-[340px] lg:grid-cols-[minmax(0,4fr)_minmax(0,6fr)] lg:px-12 lg:pb-[420px]">
+      <div className="mx-auto grid max-w-[1520px] gap-12 px-6 pb-[36vw] pt-16 lg:grid-cols-[minmax(0,4fr)_minmax(0,6fr)] lg:px-12 lg:pb-[min(25vw,440px)]">
         <div className="flex flex-col gap-4">
           <img src="/images/namelogo.svg" alt="Meridian" width={120} height={27} className="h-6 w-auto self-start" />
           <p className="max-w-[34ch] text-pretty text-[15px] leading-[24px] text-ink">
@@ -54,20 +54,23 @@ export function SiteFooter() {
           ))}
         </nav>
       </div>
-      <p
+      <svg
         aria-hidden
-        className="pointer-events-none absolute -bottom-[0.18em] left-1/2 -z-10 -translate-x-1/2 select-none whitespace-nowrap font-sans text-[26vw] font-black leading-none text-ink/[0.07] lg:text-[21vw]"
+        viewBox="0 0 1000 150"
+        className="pointer-events-none absolute -bottom-[1.6vw] left-10 -z-10 hidden w-[min(64vw,1280px)] select-none fill-ink/[0.08] lg:block"
       >
-        MERIDIAN
-      </p>
+        <text x="0" y="140" textLength="1000" lengthAdjust="spacingAndGlyphs" className="font-sans text-[180px] font-bold">
+          MERIDIAN
+        </text>
+      </svg>
       <img
-        src="/images/goddess.webp"
+        src="/images/goddess-1400.webp"
         alt=""
         aria-hidden
         loading="lazy"
-        width={1774}
-        height={887}
-        className="pointer-events-none absolute -bottom-2 right-0 -z-10 w-[min(100%,560px)] sm:w-[640px] lg:w-[860px]"
+        width={1400}
+        height={700}
+        className="pointer-events-none absolute -bottom-2 right-0 -z-10 w-[66vw] lg:w-[min(40vw,800px)]"
       />
     </footer>
   );

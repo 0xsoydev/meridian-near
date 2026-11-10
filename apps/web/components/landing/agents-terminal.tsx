@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   type TabContent,
   TerminalAnimationCommandBar,
@@ -56,12 +56,8 @@ const STEPS: TabContent[] = [
   },
 ];
 
-export function AgentsTerminal({ onStep, plain = false }: { onStep?: (step: number) => void; plain?: boolean }) {
+export function AgentsTerminal({ onProgress, plain = false }: { onProgress?: (step: number, lines: number) => void; plain?: boolean }) {
   const [step, setStep] = useState(0);
-
-  useEffect(() => {
-    onStep?.(step);
-  }, [step, onStep]);
 
   const terminal = (
     <TerminalAnimationRoot
@@ -69,9 +65,15 @@ export function AgentsTerminal({ onStep, plain = false }: { onStep?: (step: numb
       activeTab={step}
       onActiveTabChange={setStep}
       onComplete={() => setStep((current) => (current + 1) % STEPS.length)}
+      {...(onProgress ? { onProgress } : {})}
+      primed
       className={`flex flex-col border border-white/10 bg-[#1A1A1A] ${plain ? "h-full" : "absolute inset-x-4 bottom-0 top-12 rounded-t-[6px] border-b-0"}`}
     >
-      <div className="min-h-0 flex-1 overflow-x-auto whitespace-pre px-4 pb-4 pt-5 font-mono text-[12px] leading-[22px] text-[#F5F5F5] [scrollbar-color:rgba(255,255,255,0.2)_transparent] lg:px-6 lg:text-[13px] lg:leading-[24px]">
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Terminal output"
+        className="min-h-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all px-4 pb-4 pt-5 font-mono focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#8FA2FF] xl:whitespace-pre xl:break-normal text-[12px] leading-[22px] text-[#F5F5F5] [scrollbar-color:rgba(255,255,255,0.2)_transparent] lg:px-6 lg:text-[13px] lg:leading-[24px]">
         <div className="flex">
           <span className={MUTED}>$ </span>
           <TerminalAnimationCommandBar />

@@ -1,6 +1,7 @@
 import { ApprovalBand } from "../components/landing/approval-band";
-import { ExpiringCredit } from "../components/landing/expiring-credit";
+import { Frame } from "../components/landing/frame";
 import { Hero } from "../components/landing/hero";
+import { IdleCapacity } from "../components/landing/idle-capacity";
 import { IndexStory } from "../components/landing/index-story";
 import { Proof } from "../components/landing/proof";
 import { RequestStory } from "../components/landing/request-story";
@@ -13,15 +14,15 @@ export default function Home() {
     <>
       <LandingNav />
       <main className="lg:px-12">
-        <div className="mx-auto max-w-[1520px] lg:border-x lg:border-line">
+        <Frame>
           <Hero />
-          <ExpiringCredit />
+          <IdleCapacity />
           <RequestStory />
           <ApprovalBand />
           <IndexStory />
           <Proof />
           <WaysIn />
-        </div>
+        </Frame>
       </main>
       <SiteFooter />
     </>

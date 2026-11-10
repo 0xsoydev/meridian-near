@@ -2,10 +2,10 @@
 
 import { motion } from "motion/react";
 import { type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { FOCUS } from "../kit";
+import { Brackets, FOCUS } from "../kit";
 import { AnimatedBeam } from "../ui/animated-beam";
+import { EASE } from "./play";
 
-const EASE = [0.22, 1, 0.36, 1] as const;
 const WIDE = "(min-width: 1280px)";
 
 function useWide(): boolean {
@@ -74,13 +74,19 @@ function Node({
   return (
     <div
       ref={nodeRef}
-      className={`relative z-10 flex min-h-11 items-center gap-2 border bg-white px-2.5 py-1.5 transition-[border-color,opacity] duration-300 ease-brand sm:gap-2.5 sm:px-3 ${
-        on ? "border-ink" : "border-line opacity-55"
+      className={`relative z-10 flex min-h-11 items-center gap-2 border bg-white px-2.5 py-1.5 transition-[border-color,color] duration-300 ease-brand sm:gap-2.5 sm:px-3 ${
+        on ? "border-ink text-ink" : "border-line text-muted"
       }`}
     >
-      <img src={logo} alt="" width={20} height={20} className="size-4 shrink-0 object-contain sm:size-5" />
+      <img
+        src={logo}
+        alt=""
+        width={20}
+        height={20}
+        className={`size-4 shrink-0 object-contain transition-opacity duration-300 ease-brand sm:size-5 ${on ? "" : "opacity-45"}`}
+      />
       <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-        <span className="truncate text-[13px] text-ink sm:text-[14px]">{name}</span>
+        <span className="truncate text-[13px] sm:text-[14px]">{name}</span>
         {detail ? <span className={`shrink-0 text-[12px] tabular-nums sm:text-[13px] ${tone}`}>{detail}</span> : null}
       </span>
     </div>
@@ -116,11 +122,7 @@ function Diagram({ step }: { step: number }) {
             step >= 1 ? "border-ink" : "border-line"
           }`}
         >
-          {["-left-[6px] -top-[6px] border-l border-t", "-right-[6px] -top-[6px] border-r border-t", "-bottom-[6px] -left-[6px] border-b border-l", "-bottom-[6px] -right-[6px] border-b border-r"].map(
-            (spot) => (
-              <span key={spot} className={`absolute size-[10px] border-accent ${spot}`} />
-            ),
-          )}
+          <Brackets />
           <img src="/images/namelogo.svg" alt="" width={120} height={27} className="h-auto w-[92px] sm:w-[116px]" />
         </div>
 
@@ -176,14 +178,15 @@ function Diagram({ step }: { step: number }) {
           fromRef={ref}
           toRef={hub}
           axis={across}
+          idle={wide}
           active={index === 0 && (step === 1 || step === 3)}
           reverse={step === 3}
         />
       ))}
       {sellers.map((ref, index) => (
-        <AnimatedBeam key={SELLERS[index]?.name} containerRef={container} fromRef={hub} toRef={ref} axis={across} active={index === 0 && step >= 2} reverse={step === 3} />
+        <AnimatedBeam key={SELLERS[index]?.name} containerRef={container} fromRef={hub} toRef={ref} axis={across} idle={wide} active={index === 0 && step >= 2} reverse={step === 3} />
       ))}
-      <AnimatedBeam containerRef={container} fromRef={wallet} toRef={hub} axis={wide ? "y" : "x"} active={step === 2} />
+      <AnimatedBeam containerRef={container} fromRef={wallet} toRef={hub} axis={wide ? "y" : "x"} idle={wide} active={step === 2} />
     </div>
   );
 }
@@ -208,7 +211,7 @@ export function RequestStory() {
   const current = STEPS[step] ?? STEPS[0]!;
 
   return (
-    <section className="grid gap-12 border-t border-line px-6 py-20 lg:px-12 lg:py-28 xl:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] xl:gap-16 xl:pb-12">
+    <section className="grid gap-12 border-t border-line px-6 py-20 lg:px-12 lg:py-24 xl:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] xl:gap-16 xl:pb-6">
       <div>
         <h2 className="max-w-[14ch] text-balance font-serif text-[40px] leading-[1.04] tracking-[-0.01em] text-ink lg:text-[60px]">
           One request, start to finish.
@@ -216,7 +219,7 @@ export function RequestStory() {
         <p className="mt-6 max-w-[44ch] text-pretty text-[17px] leading-[27px] text-ink">
           What happens when your agent asks a model for an answer, where the money moves, and who gets paid.
         </p>
-        <ol className="mt-6 hidden xl:block">
+        <ol className="mt-4 hidden xl:block">
           {STEPS.map((item, index) => (
             <li
               key={item.title}
@@ -225,7 +228,7 @@ export function RequestStory() {
               }}
               data-step={index}
               aria-current={step === index ? "step" : undefined}
-              className={`flex min-h-[50vh] flex-col justify-center gap-3 border-l-2 pl-6 transition-[color,border-color] duration-300 ease-brand ${
+              className={`flex min-h-[34vh] flex-col justify-center gap-3 border-l-2 pl-6 transition-[color,border-color] duration-300 ease-brand ${
                 step === index ? "border-accent text-ink" : "border-transparent text-muted"
               }`}
             >
