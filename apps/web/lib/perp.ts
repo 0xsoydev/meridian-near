@@ -9,6 +9,8 @@ export {
   maxOpen,
   notional,
   openMargin,
+  payoffLadder,
+  historyRows,
   orderPlan,
   positionAfter,
   tradeFee,

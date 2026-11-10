@@ -2,7 +2,23 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { buildRollups, clampIndex, merkleRoot, recomputeIndex, shouldPost, stepToward, twap, type Fill } from "./rollup.ts";
+import { runs } from "./index-math.ts";
 import type { Rollup } from "./types";
+
+test("runs folds consecutive index posts at one price into a single run", () => {
+  const posts = [
+    { price_micro_per_mtok: "180000", at: 1 },
+    { price_micro_per_mtok: "180000", at: 2 },
+    { price_micro_per_mtok: "178333", at: 3 },
+    { price_micro_per_mtok: "180000", at: 4 },
+  ];
+  assert.deepEqual(runs(posts), [
+    { price: 180_000n, from: 1, to: 2, count: 2 },
+    { price: 178_333n, from: 3, to: 3, count: 1 },
+    { price: 180_000n, from: 4, to: 4, count: 1 },
+  ]);
+  assert.deepEqual(runs([]), []);
+});
 
 const fill = (id: string, model: string, price: bigint, charge: bigint, tokens: bigint): Fill => ({
   id,

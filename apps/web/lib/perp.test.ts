@@ -1,6 +1,53 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { liquidatable, liquidationPrice, maxOpen, notional, openMargin, orderPlan, positionAfter, tradeFee } from "./perp.ts";
+import { historyRows, liquidatable, liquidationPrice, maxOpen, notional, openMargin, orderPlan, payoffLadder, positionAfter, tradeFee } from "./perp.ts";
+import type { PerpEvent } from "./types.ts";
+
+test("history rows label each event by the size it left behind", () => {
+  const event = (size: string, kind: PerpEvent["kind"] = "modified", model = "glm-5.3"): PerpEvent => ({
+    tx_hash: `t${size}${kind}`,
+    at: "2026-11-10T00:00:00.000Z",
+    model,
+    kind,
+    size,
+    margin_usd_micro: "0",
+    price_micro_per_mtok: "180000",
+    fee_usd_micro: "0",
+    reward_usd_micro: "0",
+  });
+  const newestFirst = [
+    event("0", "liquidated"),
+    event("-5000000"),
+    event("-5000000"),
+    event("5000000"),
+    event("15000000"),
+    event("2000000", "modified", "deepseek-v4.1-flash"),
+    event("10000000"),
+  ];
+  assert.deepEqual(
+    historyRows(newestFirst).map((row) => [row.action, row.change]),
+    [
+      ["liquidated", 5_000_000n],
+      ["margin", 0n],
+      ["flipped", -10_000_000n],
+      ["reduced", -10_000_000n],
+      ["increased", 5_000_000n],
+      ["opened", 2_000_000n],
+      ["opened", 10_000_000n],
+    ],
+  );
+  assert.equal(historyRows([event("0")])[0]?.action, "margin");
+});
+
+test("the payoff ladder prices PnL and equity at each index move and flags liquidation", () => {
+  const long = { size: 10_000_000n, margin: 600_000n, entryPrice: 180_000n, fundingOwed: 0n };
+  const [down50, down20, up10] = payoffLadder(long, 180_000n, [-5000n, -2000n, 1000n]);
+  assert.deepEqual(up10, { move: 1000n, price: 198_000n, pnl: 180_000n, equity: 780_000n, liquidated: false });
+  assert.deepEqual(down20, { move: -2000n, price: 144_000n, pnl: -360_000n, equity: 240_000n, liquidated: false });
+  assert.equal(down50?.liquidated, true);
+  const short = payoffLadder({ ...long, size: -10_000_000n }, 180_000n, [1000n]);
+  assert.equal(short[0]?.pnl, -180_000n);
+});
 
 test("the position an order leaves matches what PerpMarket books", () => {
   const price = 150_000n;

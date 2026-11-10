@@ -260,6 +260,29 @@ export const approvals = pgTable(
   ],
 );
 
+export const perpEvents = pgTable(
+  "perp_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    txHash: text("tx_hash").notNull(),
+    position: integer("position").notNull(),
+    account: text("account").notNull(),
+    model: text("model").notNull(),
+    kind: text("kind").notNull(),
+    size: bigint("size", { mode: "bigint" }).notNull(),
+    margin: bigint("margin", { mode: "bigint" }).notNull(),
+    price: bigint("price", { mode: "bigint" }).notNull(),
+    fee: bigint("fee", { mode: "bigint" }).notNull(),
+    reward: bigint("reward", { mode: "bigint" }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("perp_events_kind", sql`${t.kind} in ('modified','liquidated')`),
+    uniqueIndex("perp_events_tx_position_key").on(t.txHash, t.position),
+    index("perp_events_account_created_idx").on(t.account, t.createdAt),
+  ],
+);
+
 export type AccountRow = typeof accounts.$inferSelect;
 export type ListingRow = typeof listings.$inferSelect;
 export type KeyRow = typeof keys.$inferSelect;

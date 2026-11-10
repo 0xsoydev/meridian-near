@@ -1,3 +1,5 @@
+import type { PerpEvent } from "./types";
+
 const MM_BPS = 500n;
 const SEARCH_CEILING = 1n << 128n;
 
@@ -38,6 +40,47 @@ export function tradeFee(sizeDelta: bigint, price: bigint): bigint {
 export function openMargin(sizeDelta: bigint, price: bigint, maxLeverage: bigint): bigint {
   const value = notional(sizeDelta, price);
   return value / maxLeverage + value / 100n + tradeFee(sizeDelta, price) + 1n;
+}
+
+export type HistoryAction = "opened" | "increased" | "reduced" | "flipped" | "closed" | "margin" | "liquidated";
+
+export type HistoryRow = { event: PerpEvent; change: bigint; action: HistoryAction };
+
+export function historyRows(events: ReadonlyArray<PerpEvent>): HistoryRow[] {
+  const sizes = new Map<string, bigint>();
+  const rows = events.toReversed().map((event): HistoryRow => {
+    const before = sizes.get(event.model) ?? 0n;
+    const after = BigInt(event.size);
+    sizes.set(event.model, after);
+    const change = after - before;
+    const grew = (after < 0n ? -after : after) > (before < 0n ? -before : before);
+    const action: HistoryAction =
+      event.kind === "liquidated"
+        ? "liquidated"
+        : change === 0n
+          ? "margin"
+          : after === 0n
+            ? "closed"
+            : before === 0n
+              ? "opened"
+              : before > 0n !== after > 0n
+                ? "flipped"
+                : grew
+                  ? "increased"
+                  : "reduced";
+    return { event, change, action };
+  });
+  return rows.toReversed();
+}
+
+export type LadderRow = { move: bigint; price: bigint; pnl: bigint; equity: bigint; liquidated: boolean };
+
+export function payoffLadder(p: PositionMath, price: bigint, movesBps: ReadonlyArray<bigint>): LadderRow[] {
+  return movesBps.map((move) => {
+    const at = (price * (10_000n + move)) / 10_000n;
+    const gain = pnl(p.size, p.entryPrice, at);
+    return { move, price: at, pnl: gain, equity: p.margin + gain - p.fundingOwed, liquidated: liquidatable(p, at) };
+  });
 }
 
 export function maxOpen(wallet: bigint, price: bigint, leverage: bigint): bigint {

@@ -32,6 +32,23 @@ export function shouldPost(next: bigint, last: bigint, updatedAt: bigint, nowS: 
   return move * 10_000n >= last * POST_MOVE_BPS || nowS - updatedAt >= HEARTBEAT_S;
 }
 
+export type Run = { price: bigint; from: number; to: number; count: number };
+
+export function runs(posts: ReadonlyArray<{ price_micro_per_mtok: string; at: number }>): Run[] {
+  const out: Run[] = [];
+  for (const post of posts) {
+    const price = BigInt(post.price_micro_per_mtok);
+    const last = out.at(-1);
+    if (last && last.price === price) {
+      last.to = post.at;
+      last.count += 1;
+    } else {
+      out.push({ price, from: post.at, to: post.at, count: 1 });
+    }
+  }
+  return out;
+}
+
 export type IndexRecompute =
   | { state: "no-post"; twap: bigint | null; band: [bigint, bigint] | null }
   | { state: "no-input"; latest: bigint }

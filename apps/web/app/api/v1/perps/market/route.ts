@@ -20,6 +20,7 @@ export async function GET(request: Request): Promise<Response> {
     short_oi: market.shortOi.toString(),
     funding_rate_per_hour: market.fundingRatePerHour.toString(),
     max_leverage: market.maxLeverage.toString(),
+    max_oi: market.maxOi.toString(),
     posts: posts.map((post) => ({ price_micro_per_mtok: post.price, at: post.at })),
   });
 }
