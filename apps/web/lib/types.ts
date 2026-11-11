@@ -130,6 +130,10 @@ export type SwarmView = { agents: SwarmAgentView[] };
 
 export type ReturnedFloat = { returned_usd_micro: string };
 
+export type SignedNonce = { nonce: number };
+
+export type SignedResult = { tx: string | null };
+
 export type CapSummary = {
   per_day_usd_micro: string;
   used_today_usd_micro: string;

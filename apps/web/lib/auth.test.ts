@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ethereumSigner, verifySigned } from "./auth.ts";
@@ -46,4 +47,14 @@ test("verifySigned accepts an Ethereum signature only from the 0x account it nam
   const stale = intent({ issued_at: new Date(Date.now() - 600_000).toISOString() });
   assert.equal(await verifySigned({ account_id: address, signature: personalSign(stale), message: stale }, "meridian.test", "list_keys"), null);
   assert.equal(await verifySigned({ account_id: address, signature, message, public_key: "x" }, "meridian.test", "list_keys"), null);
+});
+
+test("verifySigned accepts a Solana signature only from the key it names", async () => {
+  const seed = keccak_256(Buffer.from("meridian auth solana", "utf8"));
+  const owner = Buffer.from(ed25519.getPublicKey(seed)).toString("hex");
+  const message = intent();
+  const signature = Buffer.from(ed25519.sign(Buffer.from(message, "utf8"), seed)).toString("hex");
+  assert.equal((await verifySigned({ account_id: owner, signature, message }, "meridian.test", "list_keys"))?.account, owner);
+  assert.equal(await verifySigned({ account_id: "0".repeat(64), signature, message }, "meridian.test", "list_keys"), null);
+  assert.equal(await verifySigned({ account_id: owner, signature, message: intent({ key_id: "x" }) }, "meridian.test", "list_keys"), null);
 });

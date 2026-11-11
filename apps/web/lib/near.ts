@@ -49,6 +49,10 @@ export function opsKey(): KeyPairString {
   return required("NEAR_WEB_KEY") as KeyPairString;
 }
 
+export function relayKey(): KeyPairString {
+  return required("NEAR_RELAY_KEY") as KeyPairString;
+}
+
 export function keeperId(): string {
   return required("NEAR_OPS_ID");
 }

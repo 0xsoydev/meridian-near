@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
@@ -48,8 +49,8 @@ const envelopeSchema = z.union([
     .strict(),
   z
     .object({
-      account_id: z.string().regex(/^0x[0-9a-f]{40}$/),
-      signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+      account_id: z.string().regex(/^(0x[0-9a-f]{40}|[0-9a-f]{64})$/),
+      signature: z.string().regex(/^(0x[0-9a-fA-F]{130}|[0-9a-f]{128})$/),
       message: z.string().min(1).max(4000),
     })
     .strict(),
@@ -71,6 +72,16 @@ export function ethereumSigner(message: string, signature: string): string | nul
 }
 
 const intentSchema = z.object({ domain: z.string(), action: z.string(), issued_at: z.string() }).passthrough();
+
+export function signedBy(owner: string, message: string, signature: string): boolean {
+  if (/^0x[0-9a-f]{40}$/.test(owner)) return ethereumSigner(message, signature) === owner;
+  if (!/^[0-9a-f]{64}$/.test(owner) || !/^[0-9a-f]{128}$/.test(signature)) return false;
+  try {
+    return ed25519.verify(Buffer.from(signature, "hex"), Buffer.from(message, "utf8"), Buffer.from(owner, "hex"));
+  } catch {
+    return false;
+  }
+}
 
 export async function verifySigned(
   envelope: unknown,
@@ -100,7 +111,7 @@ export async function verifySigned(
           message: parsed.data.message,
           recipient: host,
         })
-      : ethereumSigner(parsed.data.message, parsed.data.signature) === parsed.data.account_id;
+      : signedBy(parsed.data.account_id, parsed.data.message, parsed.data.signature);
   if (!valid) return null;
   return { account: parsed.data.account_id.toLowerCase(), intent: intent.data };
 }
