@@ -83,7 +83,7 @@ export type DeviceStatus = {
 
 export type ApprovalView = { key_id: string; name: string; cap_usd_micro: string | null };
 
-export type WalletView = { wallet_usd_micro: string; near_usdc_micro: string };
+export type WalletView = { wallet_usd_micro: string; near_usdc_micro: string; near_yocto: string };
 
 export type ModelRow = {
   id: string;

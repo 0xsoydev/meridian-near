@@ -190,7 +190,7 @@ const perpEvent: z.ZodType<PerpEvent> = z.object({
 
 export const perpHistorySchema = list(perpEvent);
 
-export const walletSchema: z.ZodType<WalletView> = z.object({ wallet_usd_micro: int, near_usdc_micro: int });
+export const walletSchema: z.ZodType<WalletView> = z.object({ wallet_usd_micro: int, near_usdc_micro: int, near_yocto: int });
 
 const keySummary: z.ZodType<KeySummary> = z.object({
   key_id: z.string(),
