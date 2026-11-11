@@ -16,6 +16,7 @@ pub const MIN_POST_GAP: u64 = 60;
 pub const HISTORY: u64 = 120;
 pub const FT_GAS: Gas = Gas::from_tgas(30);
 pub const CALLBACK_GAS: Gas = Gas::from_tgas(10);
+pub const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
 
 const ONE: i128 = 1_000_000;
 const FUNDING_SCALE: i128 = 1_000_000_000_000_000_000_000_000;
@@ -221,28 +222,14 @@ impl Core {
     pub fn withdraw(&mut self, amount: U128, to: Option<AccountId>) -> Promise {
         near_sdk::assert_one_yocto();
         let caller = env::predecessor_account_id();
-        let amount = amount.0;
-        let balance = self.wallet_of(&caller);
-        require!(balance >= amount, "wallet is short");
-        self.wallets.insert(caller.clone(), balance - amount);
         let receiver = to.unwrap_or_else(|| caller.clone());
-        emit(
-            "withdraw",
-            near_sdk::serde_json::json!({
-                "account": caller,
-                "to": receiver,
-                "amount": amount.to_string(),
-            }),
-        );
-        ext_ft::ext(self.usdc.clone())
-            .with_attached_deposit(NearToken::from_yoctonear(1))
-            .with_static_gas(FT_GAS)
-            .ft_transfer(receiver, U128(amount), None)
-            .then(
-                Self::ext(env::current_account_id())
-                    .with_static_gas(CALLBACK_GAS)
-                    .on_withdraw(caller, U128(amount)),
-            )
+        self.pay_out(caller, amount.0, receiver, false)
+    }
+
+    pub fn withdraw_signed(&mut self, owner: AccountId, amount: U128, to: AccountId, nonce: u64, valid_until: u64, signature: String) -> Promise {
+        let action = format!("Withdraw {} USDC to {}.", usdc_text(amount.0), to);
+        self.authorize(&owner, &action, nonce, valid_until, &signature);
+        self.pay_out(owner, amount.0, to, true)
     }
 
     #[private]
@@ -262,6 +249,16 @@ impl Core {
         near_sdk::assert_one_yocto();
         let owner = env::predecessor_account_id();
         self.store_cap(&owner, key, per_day.0);
+    }
+
+    pub fn set_cap_signed(&mut self, owner: AccountId, key: String, per_day: U128, nonce: u64, valid_until: u64, signature: String) {
+        let action = format!("Set a daily limit of {} USDC for key {}.", usdc_text(per_day.0), key);
+        self.authorize(&owner, &action, nonce, valid_until, &signature);
+        self.store_cap(&owner, key, per_day.0);
+    }
+
+    pub fn nonce_of(&self, owner: AccountId) -> u64 {
+        nonce_read(&owner)
     }
 
     pub fn pull(&mut self, owner: AccountId, key: String, amount: U128) -> U128 {
@@ -393,101 +390,29 @@ impl Core {
     #[payable]
     pub fn modify(&mut self, model: String, size_delta: I128, margin_delta: I128) -> PositionView {
         near_sdk::assert_one_yocto();
-        let caller = env::predecessor_account_id();
-        let size_delta = size_delta.0;
-        let margin_delta = margin_delta.0;
-        let mut market = self.market_or_panic(&model);
-        let price = self.fresh_price(&market);
-        accrue(&mut market, price);
+        self.modify_for(env::predecessor_account_id(), model, size_delta.0, margin_delta.0)
+    }
 
-        let key = (caller.clone(), model.clone());
-        let mut position = self.positions.get(&key).copied().unwrap_or_default();
-        let old_size = position.size;
-        let new_size = old_size.checked_add(size_delta).expect("size overflow");
-        require!(
-            !((old_size > 0 && new_size < 0) || (old_size < 0 && new_size > 0)),
-            "FlipNotAllowed"
+    pub fn modify_signed(
+        &mut self,
+        owner: AccountId,
+        model: String,
+        size_delta: I128,
+        margin_delta: I128,
+        nonce: u64,
+        valid_until: u64,
+        signature: String,
+    ) -> PositionView {
+        let margin = margin_delta.0;
+        let action = format!(
+            "Change your {} position: size {:+}, margin {}{} USDC.",
+            model,
+            size_delta.0,
+            if margin < 0 { "-" } else { "+" },
+            usdc_text(margin.unsigned_abs())
         );
-
-        let owed = funding_owed(old_size, market.cum_funding, position.entry_cum_funding);
-        let mut margin = position.margin as i128 - owed;
-        let mut vault_balance = self.vault as i128 + owed;
-        let old_abs = old_size.unsigned_abs();
-        let new_abs = new_size.unsigned_abs();
-
-        if new_abs > old_abs {
-            let added = new_abs - old_abs;
-            position.entry_price = (old_abs * position.entry_price + added * price) / new_abs;
-        } else if new_abs < old_abs {
-            let realized = pnl(old_size - new_size, position.entry_price, price);
-            margin += realized;
-            vault_balance -= realized;
-        }
-        position.entry_cum_funding = market.cum_funding;
-
-        let fee = fee_for(size_delta, price);
-        margin = margin - fee as i128 + margin_delta;
-
-        if old_size > 0 || new_size > 0 {
-            market.long_oi = market.long_oi + new_abs - old_abs;
-        } else {
-            market.short_oi = market.short_oi + new_abs - old_abs;
-        }
-        if new_abs > old_abs {
-            let side = if new_size > 0 { market.long_oi } else { market.short_oi };
-            require!(side <= market.max_oi, "OiCapExceeded");
-        }
-
-        let mut payout = 0u128;
-        let mut final_margin = 0u128;
-        if new_size == 0 {
-            if margin < 0 {
-                require!(margin_delta >= 0, "InsufficientMargin");
-                vault_balance += margin;
-            } else {
-                payout = margin as u128;
-            }
-            self.positions.remove(&key);
-        } else {
-            require!(margin >= 0, "InsufficientMargin");
-            position.size = new_size;
-            position.margin = margin as u128;
-            final_margin = position.margin;
-            let equity = margin + pnl(new_size, position.entry_price, price);
-            if (new_abs > old_abs || margin_delta < 0)
-                && equity * (market.max_leverage as i128) < (notional(new_size, price) as i128)
-            {
-                panic!("InsufficientMargin");
-            }
-            self.positions.insert(key.clone(), position);
-        }
-
-        require!(vault_balance >= 0, "VaultInsufficient");
-        self.vault = vault_balance as u128;
-
-        if margin_delta > 0 {
-            self.debit(&caller, margin_delta as u128);
-        } else if margin_delta < 0 {
-            self.credit(&caller, (-margin_delta) as u128);
-        }
-        if payout > 0 {
-            self.credit(&caller, payout);
-        }
-        self.treasury += fee;
-        self.markets.insert(model.clone(), market);
-
-        emit(
-            "position_modified",
-            near_sdk::serde_json::json!({
-                "account": caller,
-                "model": model,
-                "size": new_size.to_string(),
-                "margin": final_margin.to_string(),
-                "price": price.to_string(),
-                "fee": fee.to_string(),
-            }),
-        );
-        self.position_view(&caller, &model)
+        self.authorize(&owner, &action, nonce, valid_until, &signature);
+        self.modify_for(owner, model, size_delta.0, margin)
     }
 
     pub fn liquidate(&mut self, account: AccountId, model: String) {
@@ -652,6 +577,141 @@ impl Core {
 }
 
 impl Core {
+    fn modify_for(&mut self, caller: AccountId, model: String, size_delta: i128, margin_delta: i128) -> PositionView {
+        let mut market = self.market_or_panic(&model);
+        let price = self.fresh_price(&market);
+        accrue(&mut market, price);
+
+        let key = (caller.clone(), model.clone());
+        let mut position = self.positions.get(&key).copied().unwrap_or_default();
+        let old_size = position.size;
+        let new_size = old_size.checked_add(size_delta).expect("size overflow");
+        require!(
+            !((old_size > 0 && new_size < 0) || (old_size < 0 && new_size > 0)),
+            "FlipNotAllowed"
+        );
+
+        let owed = funding_owed(old_size, market.cum_funding, position.entry_cum_funding);
+        let mut margin = position.margin as i128 - owed;
+        let mut vault_balance = self.vault as i128 + owed;
+        let old_abs = old_size.unsigned_abs();
+        let new_abs = new_size.unsigned_abs();
+
+        if new_abs > old_abs {
+            let added = new_abs - old_abs;
+            position.entry_price = (old_abs * position.entry_price + added * price) / new_abs;
+        } else if new_abs < old_abs {
+            let realized = pnl(old_size - new_size, position.entry_price, price);
+            margin += realized;
+            vault_balance -= realized;
+        }
+        position.entry_cum_funding = market.cum_funding;
+
+        let fee = fee_for(size_delta, price);
+        margin = margin - fee as i128 + margin_delta;
+
+        if old_size > 0 || new_size > 0 {
+            market.long_oi = market.long_oi + new_abs - old_abs;
+        } else {
+            market.short_oi = market.short_oi + new_abs - old_abs;
+        }
+        if new_abs > old_abs {
+            let side = if new_size > 0 { market.long_oi } else { market.short_oi };
+            require!(side <= market.max_oi, "OiCapExceeded");
+        }
+
+        let mut payout = 0u128;
+        let mut final_margin = 0u128;
+        if new_size == 0 {
+            if margin < 0 {
+                require!(margin_delta >= 0, "InsufficientMargin");
+                vault_balance += margin;
+            } else {
+                payout = margin as u128;
+            }
+            self.positions.remove(&key);
+        } else {
+            require!(margin >= 0, "InsufficientMargin");
+            position.size = new_size;
+            position.margin = margin as u128;
+            final_margin = position.margin;
+            let equity = margin + pnl(new_size, position.entry_price, price);
+            if (new_abs > old_abs || margin_delta < 0)
+                && equity * (market.max_leverage as i128) < (notional(new_size, price) as i128)
+            {
+                panic!("InsufficientMargin");
+            }
+            self.positions.insert(key.clone(), position);
+        }
+
+        require!(vault_balance >= 0, "VaultInsufficient");
+        self.vault = vault_balance as u128;
+
+        if margin_delta > 0 {
+            self.debit(&caller, margin_delta as u128);
+        } else if margin_delta < 0 {
+            self.credit(&caller, (-margin_delta) as u128);
+        }
+        if payout > 0 {
+            self.credit(&caller, payout);
+        }
+        self.treasury += fee;
+        self.markets.insert(model.clone(), market);
+
+        emit(
+            "position_modified",
+            near_sdk::serde_json::json!({
+                "account": caller,
+                "model": model,
+                "size": new_size.to_string(),
+                "margin": final_margin.to_string(),
+                "price": price.to_string(),
+                "fee": fee.to_string(),
+            }),
+        );
+        self.position_view(&caller, &model)
+    }
+
+    fn pay_out(&mut self, owner: AccountId, amount: u128, receiver: AccountId, register: bool) -> Promise {
+        let balance = self.wallet_of(&owner);
+        require!(balance >= amount, "wallet is short");
+        self.wallets.insert(owner.clone(), balance - amount);
+        emit(
+            "withdraw",
+            near_sdk::serde_json::json!({
+                "account": owner,
+                "to": receiver,
+                "amount": amount.to_string(),
+            }),
+        );
+        let transfer = ext_ft::ext(self.usdc.clone())
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .with_static_gas(FT_GAS)
+            .ft_transfer(receiver.clone(), U128(amount), None);
+        let sent = if register {
+            ext_ft::ext(self.usdc.clone())
+                .with_attached_deposit(STORAGE_DEPOSIT)
+                .with_static_gas(FT_GAS)
+                .storage_deposit(Some(receiver), Some(true))
+                .then(transfer)
+        } else {
+            transfer
+        };
+        sent.then(
+            Self::ext(env::current_account_id())
+                .with_static_gas(CALLBACK_GAS)
+                .on_withdraw(owner, U128(amount)),
+        )
+    }
+
+    fn authorize(&mut self, owner: &AccountId, action: &str, nonce: u64, valid_until: u64, signature: &str) {
+        require!(env::block_timestamp_ms() <= valid_until, "signature expired");
+        require!(nonce == nonce_read(owner), "stale nonce");
+        let message = order_text(&env::current_account_id(), owner, action, nonce, valid_until);
+        require!(signed_by(owner, &message, signature), "bad signature");
+        env::storage_write(&nonce_key(owner), &(nonce + 1).to_le_bytes());
+    }
+
     fn wallet_of(&self, account: &AccountId) -> u128 {
         self.wallets.get(account).copied().unwrap_or(0)
     }
@@ -785,6 +845,85 @@ fn is_liquidatable(position: &Position, price: u128, cum: i128) -> bool {
     equity_at(position, price, cum) * 10_000 < (notional(position.size, price) * MM_BPS) as i128
 }
 
+fn nonce_key(owner: &AccountId) -> Vec<u8> {
+    [b"n".as_slice(), owner.as_bytes()].concat()
+}
+
+fn nonce_read(owner: &AccountId) -> u64 {
+    env::storage_read(&nonce_key(owner))
+        .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
+        .map(u64::from_le_bytes)
+        .unwrap_or(0)
+}
+
+fn usdc_text(micro: u128) -> String {
+    let whole = micro / 1_000_000;
+    let fraction = micro % 1_000_000;
+    if fraction == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{fraction:06}").trim_end_matches('0').to_string()
+    }
+}
+
+fn iso(ms: u64) -> String {
+    let seconds = ms / 1_000;
+    let days = (seconds / 86_400) as i64 + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let time = seconds % 86_400;
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", time / 3_600, time % 3_600 / 60, time % 60)
+}
+
+fn hex(text: &str) -> Option<Vec<u8>> {
+    let text = text.strip_prefix("0x").unwrap_or(text);
+    if text.len() % 2 != 0 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..text.len()).step_by(2).map(|at| u8::from_str_radix(&text[at..at + 2], 16).ok()).collect()
+}
+
+fn order_text(contract: &AccountId, owner: &AccountId, action: &str, nonce: u64, valid_until: u64) -> String {
+    let id = owner.as_str();
+    let account = match hex(id) {
+        Some(key) if id.len() == 64 => near_sdk::bs58::encode(key).into_string(),
+        _ => id.to_string(),
+    };
+    format!(
+        "Meridian\n{action}\nAccount: {account}\nContract: {contract}\nNonce: {nonce}\nValid until: {}",
+        iso(valid_until)
+    )
+}
+
+fn signed_by(owner: &AccountId, message: &str, signature: &str) -> bool {
+    let id = owner.as_str();
+    let (Some(key), Some(signature)) = (hex(id), hex(signature)) else {
+        return false;
+    };
+    if id.starts_with("0x") && key.len() == 20 && signature.len() == 65 {
+        let prefixed = format!("\x19Ethereum Signed Message:\n{}{}", message.len(), message);
+        let hash = env::keccak256_array(prefixed.as_bytes());
+        let v = signature[64];
+        let recovery = if v >= 27 { v - 27 } else { v };
+        recovery <= 1
+            && env::ecrecover(&hash, &signature[..64], recovery, true)
+                .is_some_and(|public| env::keccak256_array(&public)[12..] == key[..])
+    } else if id.len() == 64 {
+        match (<[u8; 64]>::try_from(signature.as_slice()), <[u8; 32]>::try_from(key.as_slice())) {
+            (Ok(signature), Ok(key)) => env::ed25519_verify(&signature, message.as_bytes(), &key),
+            _ => false,
+        }
+    } else {
+        false
+    }
+}
+
 fn emit(event: &str, data: near_sdk::serde_json::Value) {
     let log = near_sdk::serde_json::json!({
         "standard": "meridian",
@@ -798,6 +937,7 @@ fn emit(event: &str, data: near_sdk::serde_json::Value) {
 #[near_sdk::ext_contract(ext_ft)]
 pub trait Ft {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
+    fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
 }
 
 #[cfg(test)]
@@ -957,6 +1097,97 @@ mod tests {
             core.payout(accounts(3), U128(100_000), "p1".to_string());
         }));
         assert!(result.is_err());
+    }
+
+    const ETH: &str = "0x584dfdcc54afe75b7c00f31bd7b209330f7b2545";
+    const SOL: &str = "a95afc69cf9540e3d43be65c781a563a0f1073a8bc7d3a1afe0ddaa85c5cf9c2";
+    const ETH_SET_CAP: &str = "0x02c76fbc4e73c3eda68f654adb03c77a8cfa02e6017a6318eac642fef8cb6fa863b6ef5aa1f3352616a1f3291466eed977087283d25379c88d0db094944eae6d1c";
+    const SOL_SET_CAP: &str = "7eebdf9c3a8d62eb25e4db2668e2c3a665af9a8fce5e452d23673bf535d7afb8134dada02cbf8abad58879aaec257d8e93cbe04b5cdeb53dc16279494aa2be08";
+    const ETH_WITHDRAW: &str = "0x1f957eb929d0023562e6333adefaa898fc7802b95558fe7f7709bede0bffefdf625bba02db441d4980e094f2b8465a52b56a09a3b85e90cc46c77d1874ec84111b";
+    const SOL_MODIFY: &str = "0e9e2e2d00d65ef78b6a47e284fea359fbbb03532947968f6dc32767dea1117c01b2260ae91854afab5fd82a85dd55ca5ba6598e6a7b4599da51266a133cd808";
+    const VALID: u64 = 1_900_000_000_000;
+
+    fn relayed(at_ms: u64) {
+        let mut builder = context(accounts(3));
+        builder.current_account_id("core.near".parse().unwrap());
+        builder.block_timestamp(at_ms * 1_000_000);
+        testing_env!(builder.build());
+    }
+
+    fn set_cap_signed(core: &mut Core, owner: &str, per_day: u128, signature: &str) {
+        core.set_cap_signed(owner.parse().unwrap(), "k1".to_string(), U128(per_day), 0, VALID, signature.to_string());
+    }
+
+    #[test]
+    fn a_signed_limit_comes_from_the_owners_wallet() {
+        let mut core = core();
+        relayed(1_800_000_000_000);
+        for (owner, signature) in [(ETH, ETH_SET_CAP), (SOL, SOL_SET_CAP)] {
+            set_cap_signed(&mut core, owner, 5_000_000, signature);
+            assert_eq!(core.cap(owner.parse().unwrap(), "k1".to_string()).per_day.0, 5_000_000);
+            assert_eq!(core.nonce_of(owner.parse().unwrap()), 1);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "stale nonce")]
+    fn a_signed_limit_cannot_be_replayed() {
+        let mut core = core();
+        relayed(1_800_000_000_000);
+        set_cap_signed(&mut core, ETH, 5_000_000, ETH_SET_CAP);
+        set_cap_signed(&mut core, ETH, 5_000_000, ETH_SET_CAP);
+    }
+
+    #[test]
+    #[should_panic(expected = "bad signature")]
+    fn a_signature_only_works_for_its_owner() {
+        let mut core = core();
+        relayed(1_800_000_000_000);
+        set_cap_signed(&mut core, "0x0000000000000000000000000000000000000001", 5_000_000, ETH_SET_CAP);
+    }
+
+    #[test]
+    #[should_panic(expected = "bad signature")]
+    fn a_signature_only_covers_what_was_signed() {
+        let mut core = core();
+        relayed(1_800_000_000_000);
+        set_cap_signed(&mut core, ETH, 6_000_000, ETH_SET_CAP);
+    }
+
+    #[test]
+    #[should_panic(expected = "signature expired")]
+    fn an_expired_signature_is_refused() {
+        let mut core = core();
+        relayed(VALID + 1);
+        set_cap_signed(&mut core, ETH, 5_000_000, ETH_SET_CAP);
+    }
+
+    #[test]
+    fn a_signed_withdrawal_debits_the_owner() {
+        let mut core = core();
+        fund(&mut core, accounts(0), 1_000_000, &format!(r#"{{"fund":{{"to":"{ETH}"}}}}"#));
+        relayed(1_800_000_000_000);
+        let _ = core.withdraw_signed(ETH.parse().unwrap(), U128(400_000), "bob.near".parse().unwrap(), 0, VALID, ETH_WITHDRAW.to_string());
+        assert_eq!(core.wallet(ETH.parse().unwrap()).0, 600_000);
+    }
+
+    #[test]
+    fn a_signed_trade_opens_a_position() {
+        let mut core = core();
+        fund(&mut core, accounts(0), 1_000_000, &format!(r#"{{"fund":{{"to":"{SOL}"}}}}"#));
+        list_and_post(&mut core, 200_000);
+        relayed(2_000);
+        let opened = core.modify_signed(SOL.parse().unwrap(), "glm".to_string(), I128(1_000_000), I128(200_000), 0, VALID, SOL_MODIFY.to_string());
+        assert_eq!(opened.size.0, 1_000_000);
+        assert_eq!(core.wallet(SOL.parse().unwrap()).0, 800_000);
+    }
+
+    #[test]
+    fn the_signed_text_matches_the_app() {
+        assert_eq!(
+            order_text(&"core.near".parse().unwrap(), &SOL.parse().unwrap(), "Change your glm position: size -1000000, margin +0.25 USDC.", 3, VALID),
+            "Meridian\nChange your glm position: size -1000000, margin +0.25 USDC.\nAccount: CQ6NRdpdbjR6PE5g1gETqE4AxFDFqtCWHugM2yPi67BF\nContract: core.near\nNonce: 3\nValid until: 2030-03-17T17:46:40Z"
+        );
     }
 
     #[test]
