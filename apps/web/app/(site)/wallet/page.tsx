@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import QRCode from "qrcode";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { z } from "zod";
 import { ConfirmButton } from "../../../components/confirm-button";
 import { CopyButton } from "../../../components/copy-button";
 import {
@@ -22,10 +24,20 @@ import {
   Table,
   Toggle,
 } from "../../../components/kit";
-import { KEY_STORAGE, api, explorer, railName, usd } from "../../../lib/client";
+import { CHAINS, KEY_STORAGE, api, chainName, evmTransfer, explorer, paymentUri, railName, usd } from "../../../lib/client";
 import { formatMicroPerMtok, formatMtok, parseUsd, stampFormat } from "../../../lib/price";
 import type { CreateKeyResult, IntentQuote, IntentStatus, IntentToken, KeySummary, OwnerUsage, VenueStatus } from "../../../lib/types";
-import { anything, createKeySchema, intentQuoteSchema, intentStatusSchema, intentTokensSchema, keyListSchema, statusSchema, walletSchema } from "../../../lib/wire";
+import {
+  anything,
+  createKeySchema,
+  intentQuoteSchema,
+  intentStatusSchema,
+  intentTokensSchema,
+  keyListSchema,
+  returnedSchema,
+  statusSchema,
+  walletSchema,
+} from "../../../lib/wire";
 import { useNear, type NearTransaction, type Signed } from "../providers";
 
 const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
@@ -37,13 +49,31 @@ const MIN_DEPOSIT = 100_000n;
 
 type Direction = "deposit" | "withdraw";
 type Route = "near" | "chain";
-type Notice = { tone: "up" | "down"; text: string; tx?: string | null | undefined };
+type Notice = { tone: "up" | "down" | "plain"; text: string; tx?: string | null | undefined };
 type Balances = { wallet: bigint; near: bigint };
 
 const LIVE: ReadonlyArray<IntentStatus> = ["PENDING_DEPOSIT", "PROCESSING"];
+const ORDER = Object.keys(CHAINS);
+
+type Eip1193 = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+type EvmWallet = { uuid: string; name: string; icon: string; provider: Eip1193 };
+type Preview = { key: string } & ({ quote: IntentQuote } | { error: string });
+
+const announcedSchema = z.object({ info: z.object({ uuid: z.string(), name: z.string(), icon: z.string() }), provider: z.unknown() });
+const accountsSchema = z.tuple([z.string()]).rest(z.string());
+const walletErrorSchema = z.object({ code: z.number().optional(), message: z.string().optional() });
+
+function isEip1193(value: unknown): value is Eip1193 {
+  return typeof value === "object" && value !== null && "request" in value && typeof value.request === "function";
+}
+
+function rank(code: string): number {
+  const at = ORDER.indexOf(code);
+  return at === -1 ? ORDER.length : at;
+}
 
 const STEPS = [
-  ["Deposit USDC", "From your NEAR account, or from another chain through NEAR Intents."],
+  ["Deposit", "USDC from your NEAR account, or any token from another chain through NEAR Intents."],
   ["Give each agent a key", "Every key gets a daily limit that the contract enforces, so an agent can't overspend."],
   ["Withdraw any time", "Back to your NEAR account or another chain. A revoked key's balance returns in the next payout."],
 ] as const;
@@ -56,19 +86,22 @@ function plain(micro: bigint): string {
   return formatMicroPerMtok(micro).replaceAll(",", "");
 }
 
-function statusText(status: IntentStatus, direction: Direction): string {
-  if (status === "PENDING_DEPOSIT") return direction === "deposit" ? "Waiting for your deposit." : "Waiting for the withdrawal to land.";
-  if (status === "PROCESSING") return direction === "deposit" ? "Deposit seen. Converting to USDC on NEAR." : "Converting and sending to your address.";
-  if (status === "SUCCESS") return direction === "deposit" ? "Done. The USDC is in your wallet." : "Done. The funds reached your address.";
+function statusText(status: IntentStatus, direction: Direction, chain: string, sent: boolean): string {
+  if (status === "PENDING_DEPOSIT") {
+    if (direction === "withdraw") return "Waiting for the withdrawal to land.";
+    return sent ? `Paid. Waiting for ${chain} to confirm.` : `Waiting for your deposit on ${chain}.`;
+  }
+  if (status === "PROCESSING") return direction === "deposit" ? "Deposit seen. Converting to USDC." : `Converting and sending to your address on ${chain}.`;
+  if (status === "SUCCESS") return direction === "deposit" ? "Done. The USDC is in your Meridian wallet." : `Done. The funds reached your address on ${chain}.`;
   if (status === "INCOMPLETE_DEPOSIT") return "Received less than quoted. Send the rest, or wait for the refund.";
-  if (status === "REFUNDED") return "Refunded to your address.";
+  if (status === "REFUNDED") return `Refunded to your address on ${chain}.`;
   return "Failed. Any deposit is refunded.";
 }
 
 function Said({ notice }: { notice: Notice | null }) {
   if (!notice) return null;
   return (
-    <p role="status" className={`text-[13px] leading-[20px] ${notice.tone === "up" ? "text-up" : "text-down"}`}>
+    <p role="status" className={`text-[13px] leading-[20px] ${notice.tone === "up" ? "text-up" : notice.tone === "down" ? "text-down" : "text-ink"}`}>
       {notice.text}{" "}
       {notice.tx ? (
         <a href={explorer("txns", notice.tx)} target="_blank" rel="noreferrer" className={LINK}>
@@ -135,19 +168,31 @@ export default function WalletPage() {
   const [agents, setAgents] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [asked, setAsked] = useState<string | null>(null);
+  const [wallets, setWallets] = useState<EvmWallet[]>([]);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [sent, setSent] = useState(false);
+  const [qr, setQr] = useState<string | null>(null);
   const envelope = useRef<{ at: number; account: string; signed: Signed } | null>(null);
   const amountRef = useRef<HTMLInputElement | null>(null);
   const addressRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setAsked(new URLSearchParams(window.location.search).get("key"));
-    if (!MAINNET) return;
     void api("/api/v1/quotes/tokens", intentTokensSchema).then((result) => {
       if (!result.ok) return;
       const external = result.data.data.filter((token) => token.blockchain !== "near");
       setTokens(external);
-      setAsset(external[0]?.assetId ?? "");
+      setAsset(external.find((token) => token.blockchain === "base" && token.symbol === "USDC")?.assetId ?? external[0]?.assetId ?? "");
     });
+    const announce = (event: Event) => {
+      const found = announcedSchema.safeParse("detail" in event ? event.detail : null);
+      if (!found.success || !isEip1193(found.data.provider)) return;
+      const wallet = { ...found.data.info, provider: found.data.provider };
+      setWallets((all) => (all.some((item) => item.uuid === wallet.uuid) ? all : [...all, wallet]));
+    };
+    window.addEventListener("eip6963:announceProvider", announce);
+    window.dispatchEvent(new Event("eip6963:requestProvider"));
+    return () => window.removeEventListener("eip6963:announceProvider", announce);
   }, []);
 
   const readWallet = useCallback(async (): Promise<Balances | null> => {
@@ -171,9 +216,11 @@ export default function WalletPage() {
   }, [accountId, readWallet]);
 
   useEffect(() => {
-    if (!quote || (quoteStatus !== null && !LIVE.includes(quoteStatus))) return;
+    const address = quote?.depositAddress;
+    if (!quote || !address || (quoteStatus !== null && !LIVE.includes(quoteStatus))) return;
+    const memo = quote.depositMemo ? `?memo=${encodeURIComponent(quote.depositMemo)}` : "";
     const id = window.setInterval(() => {
-      void api(`/api/v1/quotes/${quote.depositAddress}`, intentStatusSchema).then((result) => {
+      void api(`/api/v1/quotes/${address}${memo}`, intentStatusSchema).then((result) => {
         if (!result.ok) return;
         setQuoteStatus(result.data.status);
         if (result.data.status === "SUCCESS") void readWallet();
@@ -181,6 +228,40 @@ export default function WalletPage() {
     }, 5_000);
     return () => window.clearInterval(id);
   }, [quote, quoteStatus, readWallet]);
+
+  useEffect(() => {
+    const micro = parseUsd(amount);
+    if (route !== "chain" || direction !== "deposit" || !asset || !accountId || micro === null || micro === 0n) return;
+    const key = `${asset}:${amount}`;
+    let live = true;
+    const id = window.setTimeout(() => {
+      void api("/api/v1/quotes", intentQuoteSchema, {
+        method: "POST",
+        body: JSON.stringify({ kind: "fund", owner: accountId, originAsset: asset, amount: micro.toString(), dry: true }),
+      }).then((result) => {
+        if (live) setPreview(result.ok ? { key, quote: result.data } : { key, error: result.message });
+      });
+    }, 400);
+    return () => {
+      live = false;
+      window.clearTimeout(id);
+    };
+  }, [route, direction, asset, amount, accountId]);
+
+  useEffect(() => {
+    const token = tokens.find((item) => item.assetId === asset);
+    if (!quote?.depositAddress || direction !== "deposit" || !token) {
+      setQr(null);
+      return;
+    }
+    let live = true;
+    void QRCode.toDataURL(paymentUri(token, quote) ?? quote.depositAddress, { margin: 1, width: 224 }).then((url) => {
+      if (live) setQr(url);
+    });
+    return () => {
+      live = false;
+    };
+  }, [quote, asset, tokens, direction]);
 
   const listKeys = async (prompt: boolean) => {
     if (!accountId) return;
@@ -279,12 +360,13 @@ export default function WalletPage() {
 
   const sendChainWithdraw = async () => {
     const micro = parseUsd(amount);
-    if (micro === null || !quote) return;
+    const target = quote?.depositAddress;
+    if (micro === null || !target) return;
     const hashes = await transact(
       "move",
       [
-        call(USDC, "storage_deposit", { account_id: quote.depositAddress, registration_only: true }, "30000000000000", STORAGE_DEPOSIT),
-        call(CORE, "withdraw", { amount: micro.toString(), to: quote.depositAddress }, "50000000000000", "1"),
+        call(USDC, "storage_deposit", { account_id: target, registration_only: true }, "30000000000000", STORAGE_DEPOSIT),
+        call(CORE, "withdraw", { amount: micro.toString(), to: target }, "50000000000000", "1"),
       ],
       "Sent. The bridge forwards it once it lands.",
       setMoney,
@@ -359,6 +441,93 @@ export default function WalletPage() {
     if (result.ok) await listKeys(false);
   };
 
+  const startOver = () => {
+    setQuote(null);
+    setQuoteStatus(null);
+    setSent(false);
+    setMoney(null);
+  };
+
+  const pay = async (wallet: EvmWallet) => {
+    const token = tokens.find((item) => item.assetId === asset);
+    const chainId = token ? CHAINS[token.blockchain]?.evm : null;
+    if (!token || !chainId) return;
+    const micro = parseUsd(amount);
+    if (micro === null || micro === 0n) return flagMoney("Enter an amount in USDC, like 10.", "amount");
+    const chain = chainName(token.blockchain);
+    startOver();
+    setBusy("pay");
+    setMoney({ tone: "plain", text: `Confirm in ${wallet.name}.` });
+    try {
+      const [from] = accountsSchema.parse(await wallet.provider.request({ method: "eth_requestAccounts" }));
+      setAddress(from);
+      setMoney({ tone: "plain", text: "Getting a deposit address from NEAR Intents." });
+      const result = await api("/api/v1/quotes", intentQuoteSchema, {
+        method: "POST",
+        body: JSON.stringify({ kind: "fund", owner: accountId, originAsset: asset, amount: micro.toString(), refundTo: from }),
+      });
+      if (!result.ok) {
+        setMoney({ tone: "down", text: result.message });
+        return;
+      }
+      const target = result.data.depositAddress;
+      if (!target) {
+        setMoney({ tone: "down", text: "NEAR Intents didn't give a deposit address. Nothing was sent." });
+        return;
+      }
+      setQuote(result.data);
+      setMoney({ tone: "plain", text: `Switch to ${chain} in ${wallet.name} to continue.` });
+      await wallet.provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: `0x${chainId.toString(16)}` }] });
+      setMoney({ tone: "plain", text: `Confirm the payment in ${wallet.name}.` });
+      const hash = z
+        .string()
+        .parse(await wallet.provider.request({ method: "eth_sendTransaction", params: [evmTransfer(from, target, BigInt(result.data.amountIn), token.contractAddress)] }));
+      setSent(true);
+      setQuoteStatus("PENDING_DEPOSIT");
+      setMoney(null);
+      await api(`/api/v1/quotes/${target}`, anything, {
+        method: "POST",
+        body: JSON.stringify({ tx_hash: hash, ...(result.data.depositMemo ? { memo: result.data.depositMemo } : {}) }),
+      });
+    } catch (error) {
+      setQuote(null);
+      setQuoteStatus(null);
+      setSent(false);
+      const failure = walletErrorSchema.safeParse(error);
+      const code = failure.success ? failure.data.code : undefined;
+      const reason = failure.success && failure.data.message ? failure.data.message : "it gave no reason";
+      setMoney({
+        tone: "down",
+        text:
+          code === 4001
+            ? `You cancelled in ${wallet.name}. Nothing was sent.`
+            : code === 4902
+              ? `Add ${chain} to ${wallet.name}, then try again.`
+              : `${wallet.name} stopped: ${reason}. Nothing was sent.`,
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const moveToWallet = async (key: KeySummary) => {
+    setBusy(`move-${key.key_id}`);
+    const signed = await sign("return_float", { key_id: key.key_id });
+    if (!signed) {
+      setBusy(null);
+      setAgents({ tone: "down", text: "The wallet didn't sign, so the balance stays on the key." });
+      return;
+    }
+    const result = await api("/api/v1/keys/return", returnedSchema, { method: "POST", body: JSON.stringify(signed) });
+    setBusy(null);
+    setAgents(
+      result.ok
+        ? { tone: "up", text: `Moving ${usd(BigInt(result.data.returned_usd_micro))} to your wallet. It arrives within a minute.` }
+        : { tone: "down", text: result.message },
+    );
+    if (result.ok) await listKeys(false);
+  };
+
   if (!accountId) {
     return (
       <div className={PAGE}>
@@ -388,6 +557,12 @@ export default function WalletPage() {
 
   const chainVerb = direction === "deposit" ? "Get a deposit address" : "Get a quote";
   const most = balances ? (direction === "deposit" ? balances.near : balances.wallet) : null;
+  const token = tokens.find((item) => item.assetId === asset) ?? null;
+  const chain = token ? chainName(token.blockchain) : "that chain";
+  const payable = direction === "deposit" && token !== null && (CHAINS[token.blockchain]?.evm ?? null) !== null && wallets.length > 0;
+  const shown = preview && preview.key === `${asset}:${amount}` ? preview : null;
+  const uri = token && quote ? paymentUri(token, quote) : null;
+  const chains = [...new Set(tokens.map((item) => item.blockchain))].sort((a, b) => rank(a) - rank(b));
 
   return (
     <div className={PAGE}>
@@ -419,9 +594,7 @@ export default function WalletPage() {
             value={direction}
             onChange={(next) => {
               setDirection(next);
-              setQuote(null);
-              setQuoteStatus(null);
-              setMoney(null);
+              startOver();
             }}
             items={[
               { value: "deposit", label: "Deposit" },
@@ -433,113 +606,191 @@ export default function WalletPage() {
             value={route}
             onChange={(next) => {
               setRoute(next);
-              setQuote(null);
-              setQuoteStatus(null);
-              setMoney(null);
+              startOver();
             }}
             items={[
               { value: "near", label: direction === "deposit" ? "From NEAR" : "To NEAR" },
               { value: "chain", label: direction === "deposit" ? "From another chain" : "To another chain" },
             ]}
           />
+          {route === "chain" ? (
+            tokens.length === 0 ? (
+              <p className="text-[13px] text-muted">Reading the chains NEAR Intents supports.</p>
+            ) : (
+              <Field label={direction === "deposit" ? "Pay with" : "Receive as"}>
+                <Select value={asset} disabled={quote !== null} onChange={(event) => setAsset(event.target.value)}>
+                  {chains.map((code) => (
+                    <optgroup key={code} label={chainName(code)}>
+                      {tokens
+                        .filter((item) => item.blockchain === code)
+                        .sort((a, b) => Number(b.symbol === "USDC") - Number(a.symbol === "USDC") || a.symbol.localeCompare(b.symbol))
+                        .map((item) => (
+                          <option key={item.assetId} value={item.assetId}>
+                            {item.symbol} on {chainName(code)}
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))}
+                </Select>
+              </Field>
+            )
+          ) : null}
+          <Field
+            label="Amount (USDC)"
+            note={
+              route === "near" && most !== null
+                ? direction === "deposit"
+                  ? `${usd(most)} in your NEAR account`
+                  : `${usd(most)} in your wallet`
+                : undefined
+            }
+          >
+            <div className="flex gap-2">
+              <input
+                ref={amountRef}
+                value={amount}
+                disabled={quote !== null}
+                onChange={(event) => setAmount(event.target.value)}
+                inputMode="decimal"
+                autoComplete="off"
+                className={INPUT}
+              />
+              {route === "near" ? (
+                <button type="button" disabled={!most} onClick={() => most && setAmount(plain(most))} className={`${SECONDARY} h-11`}>
+                  Max
+                </button>
+              ) : null}
+            </div>
+          </Field>
+          {route === "chain" && direction === "deposit" && quote === null && token ? (
+            <p role="status" className={`text-[13px] leading-[20px] ${shown === null ? "text-muted" : "error" in shown ? "text-down" : "text-ink"}`}>
+              {shown === null
+                ? "Getting a price."
+                : "error" in shown
+                  ? `No price from NEAR Intents. ${shown.error}`
+                  : `You send ${shown.quote.amountInFormatted} ${token.symbol} on ${chain}. ${usd(BigInt(shown.quote.amountOut))} USDC lands in your Meridian wallet.`}
+            </p>
+          ) : null}
+          {route === "chain" ? (
+            <Field
+              label={`Your address on ${chain}`}
+              note={
+                direction === "deposit"
+                  ? "Refunds go here if the deposit can't complete. Paying from a wallet fills it in."
+                  : "The funds go here. Double-check it: transfers can't be reversed."
+              }
+            >
+              <input
+                ref={addressRef}
+                value={address}
+                disabled={quote !== null}
+                onChange={(event) => setAddress(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className={`${INPUT} font-mono text-[13px]`}
+              />
+            </Field>
+          ) : null}
           {route === "chain" && !MAINNET ? (
             <p className="border-l-2 border-accent pl-3 text-[13px] leading-[20px] text-ink">
-              Cross-chain routes run through NEAR Intents on mainnet only. This venue is on testnet, so{" "}
-              {direction === "deposit" ? "deposit from" : "withdraw to"} NEAR for now.
+              Testnet shows prices only. {direction === "deposit" ? "Deposits from" : "Withdrawals to"} other chains run on mainnet.
             </p>
-          ) : (
-            <>
-              {route === "chain" ? (
-                tokens.length === 0 ? (
-                  <p className="text-[13px] text-muted">Reading the chains NEAR Intents supports.</p>
-                ) : (
-                  <Field label={direction === "deposit" ? "From" : "To"}>
-                    <Select value={asset} onChange={(event) => setAsset(event.target.value)}>
-                      {tokens.map((token) => (
-                        <option key={token.assetId} value={token.assetId}>
-                          {token.symbol} on {token.blockchain}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                )
-              ) : null}
-              <Field
-                label="Amount (USDC)"
-                note={
-                  route === "near" && most !== null
-                    ? direction === "deposit"
-                      ? `${usd(most)} in your NEAR account`
-                      : `${usd(most)} in your wallet`
-                    : undefined
-                }
-              >
-                <div className="flex gap-2">
-                  <input
-                    ref={amountRef}
-                    value={amount}
-                    onChange={(event) => setAmount(event.target.value)}
-                    inputMode="decimal"
-                    autoComplete="off"
-                    className={INPUT}
-                  />
-                  {route === "near" ? (
-                    <button type="button" disabled={!most} onClick={() => most && setAmount(plain(most))} className={`${SECONDARY} h-11`}>
-                      Max
-                    </button>
-                  ) : null}
-                </div>
-              </Field>
-              {route === "chain" ? (
-                <Field
-                  label={direction === "deposit" ? "Your address on that chain" : "Destination address"}
-                  note={direction === "deposit" ? "Refunds go here if the deposit can't complete." : "Double-check it. Transfers can't be reversed."}
-                >
-                  <input
-                    ref={addressRef}
-                    value={address}
-                    onChange={(event) => setAddress(event.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className={`${INPUT} font-mono text-[13px]`}
-                  />
-                </Field>
-              ) : null}
+          ) : null}
 
-              {route === "near" ? (
-                <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void moveOnNear()} className="self-start">
-                  {busy === "move" ? "Waiting for the wallet" : `${direction === "deposit" ? "Deposit" : "Withdraw"} ${amount || "0"} USDC`}
+          {route === "near" ? (
+            <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void moveOnNear()} className="self-start">
+              {busy === "move" ? "Waiting for the wallet" : `${direction === "deposit" ? "Deposit" : "Withdraw"} ${amount || "0"} USDC`}
+            </CommitButton>
+          ) : quote === null ? (
+            <div className="flex flex-wrap gap-2">
+              {payable
+                ? wallets.map((wallet) => (
+                    <CommitButton key={wallet.uuid} disabled={busy !== null || !MAINNET} aria-busy={busy === "pay"} onClick={() => void pay(wallet)}>
+                      <img src={wallet.icon} alt="" width={16} height={16} className="size-4" />
+                      Pay with {wallet.name}
+                    </CommitButton>
+                  ))
+                : null}
+              {payable ? (
+                <button
+                  type="button"
+                  disabled={busy !== null || (!MAINNET && direction === "deposit")}
+                  aria-busy={busy === "quote"}
+                  onClick={() => void quoteChain()}
+                  className={SECONDARY}
+                >
+                  {busy === "quote" ? "Asking NEAR Intents" : chainVerb}
+                </button>
+              ) : (
+                <CommitButton
+                  disabled={busy !== null || (!MAINNET && direction === "deposit")}
+                  aria-busy={busy === "quote"}
+                  onClick={() => void quoteChain()}
+                >
+                  {busy === "quote" ? "Asking NEAR Intents" : chainVerb}
                 </CommitButton>
-              ) : quote === null ? (
-                <CommitButton disabled={busy !== null} aria-busy={busy === "quote"} onClick={() => void quoteChain()} className="self-start">
-                  {busy === "quote" ? "Asking the bridge" : chainVerb}
-                </CommitButton>
-              ) : direction === "deposit" ? (
-                <div className="flex flex-col gap-3 border border-line p-4">
-                  <p className="text-[13px] text-muted">Send at least {usd(BigInt(quote.amountIn))} to</p>
-                  <code className="break-all font-mono text-[13px] text-ink">{quote.depositAddress}</code>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <CopyButton value={quote.depositAddress} label="Copy address" />
-                    <span role="status" className="text-[13px] text-ink">
-                      {statusText(quoteStatus ?? "PENDING_DEPOSIT", direction)}
-                    </span>
+              )}
+            </div>
+          ) : direction === "deposit" ? (
+            <div className="flex flex-col gap-4 border border-line p-4">
+              <p className="text-[13px] leading-[20px] text-ink">
+                {sent ? "You sent" : "Send"} {quote.amountInFormatted} {token?.symbol ?? ""} on {chain}. {usd(BigInt(quote.amountOut))} USDC lands in
+                your Meridian wallet.
+              </p>
+              {quote.depositAddress && !sent ? (
+                <div className="flex gap-4">
+                  {qr ? (
+                    <img src={qr} alt={`QR code for the deposit address on ${chain}`} width={112} height={112} className="hidden size-28 shrink-0 sm:block" />
+                  ) : null}
+                  <div className="flex min-w-0 flex-col gap-2">
+                    <span className="text-[12px] text-muted">Deposit address</span>
+                    <code className="break-all font-mono text-[13px] text-ink">{quote.depositAddress}</code>
+                    <div className="flex flex-wrap gap-2">
+                      <CopyButton value={quote.depositAddress} label="Copy address" />
+                      {uri ? (
+                        <a href={uri} className={`${SECONDARY} sm:hidden`}>
+                          Open in your wallet
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
-              ) : (
-                <div className="flex flex-col gap-3 border border-line p-4">
-                  <p className="text-[13px] text-ink">{usd(BigInt(quote.amountOut))} arrives at your address after the bridge fee.</p>
-                  {quoteStatus === null ? (
-                    <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void sendChainWithdraw()} className="self-start">
-                      {busy === "move" ? "Waiting for the wallet" : `Send ${amount} USDC`}
-                    </CommitButton>
-                  ) : (
-                    <p role="status" className="text-[13px] text-ink">
-                      {statusText(quoteStatus, direction)}
-                    </p>
-                  )}
+              ) : null}
+              {quote.depositMemo && !sent ? (
+                <div className="flex flex-col gap-2 border-t border-line pt-3">
+                  <span className="text-[12px] text-muted">Memo</span>
+                  <code className="break-all font-mono text-[13px] text-ink">{quote.depositMemo}</code>
+                  <p className="text-[13px] leading-[20px] text-down">Include this memo or the deposit can&apos;t be credited.</p>
+                  <CopyButton value={quote.depositMemo} label="Copy memo" />
                 </div>
-              )}
-            </>
+              ) : null}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span role="status" className="text-[13px] text-ink">
+                  {statusText(quoteStatus ?? "PENDING_DEPOSIT", direction, chain, sent)}
+                </span>
+                <button type="button" onClick={startOver} className={`${LINK} text-[13px] text-ink`}>
+                  Start over
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3 border border-line p-4">
+              <p className="text-[13px] leading-[20px] text-ink">
+                {quote.amountOutFormatted} {token?.symbol ?? ""} arrives on {chain} after the bridge fee.
+              </p>
+              {quoteStatus !== null ? (
+                <p role="status" className="text-[13px] text-ink">
+                  {statusText(quoteStatus, direction, chain, false)}
+                </p>
+              ) : quote.depositAddress ? (
+                <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void sendChainWithdraw()} className="self-start">
+                  {busy === "move" ? "Waiting for the wallet" : `Withdraw ${amount} USDC as ${token?.symbol ?? "it"} on ${chain}`}
+                </CommitButton>
+              ) : null}
+              <button type="button" onClick={startOver} className={`${LINK} self-start text-[13px] text-ink`}>
+                Start over
+              </button>
+            </div>
           )}
           <Said notice={money} />
           <p className="text-[12px] leading-[18px] text-muted">
@@ -627,68 +878,92 @@ export default function WalletPage() {
                 <span>Daily limit (USDC)</span>
                 <span />
               </div>
-              {keys.map((key) => {
-                const used = key.cap ? BigInt(key.cap.used_today_usd_micro) : 0n;
-                const per = key.cap ? BigInt(key.cap.per_day_usd_micro) : 0n;
-                const width = per > 0n ? Math.min(100, Number((used * 100n) / per)) : 0;
-                const name = key.name || "Unnamed key";
-                return (
-                  <div
-                    role="listitem"
-                    key={key.key_id}
-                    className={`flex flex-col gap-2 border-t border-line py-3 text-[13px] tabular-nums text-ink lg:grid lg:min-h-12 lg:grid-cols-[minmax(0,1fr)_96px_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(88px,auto)] lg:items-center lg:gap-4 lg:py-1.5 ${
-                      asked === key.key_id ? "bg-accent/5" : ""
-                    }`}
-                  >
-                    <Cell label="Agent">
-                      <span className="block truncate text-[15px] lg:text-[13px]" title={key.key_id}>
-                        {name}
-                      </span>
-                    </Cell>
-                    <Cell label="Key balance">{usd(BigInt(key.float_usd_micro))}</Cell>
-                    <Cell label="Spent today">
-                      {key.cap ? (
-                        <span className="inline-flex items-center gap-2 whitespace-nowrap">
-                          <span aria-hidden className="relative h-1 w-10 shrink-0 bg-hover">
-                            <span className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${width}%` }} />
+              {keys
+                .filter((key) => key.parent_id === null)
+                .flatMap((parent) => [parent, ...keys.filter((key) => key.parent_id === parent.key_id)])
+                .map((key) => {
+                  const child = key.parent_id !== null;
+                  const float = BigInt(key.float_usd_micro);
+                  const minutes = key.expires_at ? Math.ceil((Date.parse(key.expires_at) - Date.now()) / 60_000) : 0;
+                  const used = key.cap ? BigInt(key.cap.used_today_usd_micro) : 0n;
+                  const per = key.cap ? BigInt(key.cap.per_day_usd_micro) : 0n;
+                  const width = per > 0n ? Math.min(100, Number((used * 100n) / per)) : 0;
+                  const name = child ? (key.name.split(" / ").at(-1) ?? key.name) : key.name || "Unnamed key";
+                  return (
+                    <div
+                      role="listitem"
+                      key={key.key_id}
+                      className={`flex flex-col gap-2 border-t border-line py-3 text-[13px] tabular-nums text-ink lg:grid lg:min-h-12 lg:grid-cols-[minmax(0,1fr)_96px_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(88px,auto)] lg:items-center lg:gap-4 lg:py-1.5 ${
+                        asked === key.key_id ? "bg-accent/5" : ""
+                      } ${child ? "lg:pl-4" : ""}`}
+                    >
+                      <Cell label="Agent">
+                        <span className="block truncate text-[15px] lg:text-[13px]" title={key.key_id}>
+                          {name}
+                        </span>
+                      </Cell>
+                      <Cell label="Key balance">
+                        <span className="inline-flex flex-col items-end gap-0.5 lg:items-start">
+                          {usd(float)}
+                          {!child && float > 0n ? (
+                            <button
+                              type="button"
+                              disabled={busy !== null}
+                              onClick={() => void moveToWallet(key)}
+                              className={`${LINK} text-[12px] text-muted`}
+                            >
+                              {busy === `move-${key.key_id}` ? "Waiting for the wallet" : "Move to wallet"}
+                            </button>
+                          ) : null}
+                        </span>
+                      </Cell>
+                      <Cell label={child ? "Kind" : "Spent today"}>
+                        {child ? (
+                          <span className="text-muted">Swarm agent</span>
+                        ) : key.cap ? (
+                          <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                            <span aria-hidden className="relative h-1 w-10 shrink-0 bg-hover">
+                              <span className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${width}%` }} />
+                            </span>
+                            {usd(used)} of {usd(per)}
                           </span>
-                          {usd(used)} of {usd(per)}
-                        </span>
-                      ) : (
-                        <span className="text-muted">No limit set</span>
-                      )}
-                    </Cell>
-                    <Cell label="Daily limit">
-                      {key.cap_key ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <input
-                            value={limits[key.key_id] ?? (key.cap ? plain(per) : "5")}
-                            onChange={(event) => setLimits((all) => ({ ...all, [key.key_id]: event.target.value }))}
-                            inputMode="decimal"
-                            aria-label={`Daily limit for ${name}, in USDC`}
-                            className={`${INPUT_SM} w-20`}
-                          />
-                          <button type="button" disabled={busy !== null} onClick={() => void setLimit(key)} className={SECONDARY}>
-                            {busy === `limit-${key.key_id}` ? "Signing" : "Set"}
-                          </button>
-                        </span>
-                      ) : (
-                        <span className="text-muted">Not approved yet</span>
-                      )}
-                    </Cell>
-                    <div className="flex justify-end">
-                      <ConfirmButton
-                        label="Revoke"
-                        confirmLabel="Revoke key"
-                        question="Prepaid MTok on it is forfeited."
-                        busy={busy === `revoke-${key.key_id}` ? "Revoking" : null}
-                        disabled={busy !== null}
-                        onConfirm={() => void revoke(key)}
-                      />
+                        ) : (
+                          <span className="text-muted">No limit set</span>
+                        )}
+                      </Cell>
+                      <Cell label={child ? "Status" : "Daily limit"}>
+                        {child ? (
+                          <span className="text-muted">{minutes > 0 ? `Ends in ${minutes} min` : "Ended, balance on its way back"}</span>
+                        ) : key.cap_key ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <input
+                              value={limits[key.key_id] ?? (key.cap ? plain(per) : "5")}
+                              onChange={(event) => setLimits((all) => ({ ...all, [key.key_id]: event.target.value }))}
+                              inputMode="decimal"
+                              aria-label={`Daily limit for ${name}, in USDC`}
+                              className={`${INPUT_SM} w-20`}
+                            />
+                            <button type="button" disabled={busy !== null} onClick={() => void setLimit(key)} className={SECONDARY}>
+                              {busy === `limit-${key.key_id}` ? "Signing" : "Set"}
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="text-muted">Not approved yet</span>
+                        )}
+                      </Cell>
+                      <div className="flex justify-end">
+                        <ConfirmButton
+                          label="Revoke"
+                          confirmLabel="Revoke key"
+                          question="Prepaid MTok on it is forfeited."
+                          busy={busy === `revoke-${key.key_id}` ? "Revoking" : null}
+                          disabled={busy !== null}
+                          onConfirm={() => void revoke(key)}
+                        />
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           )}
           <Said notice={agents} />

@@ -9,7 +9,7 @@ const schema = z.discriminatedUnion("kind", [
       owner: z.string().min(2).max(64),
       originAsset: z.string().min(1),
       amount: z.string().regex(/^\d{1,30}$/),
-      refundTo: z.string().min(1).max(128),
+      refundTo: z.string().min(1).max(128).optional(),
       dry: z.boolean().optional(),
     })
     .strict(),
@@ -29,6 +29,9 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail(400, "invalid_request", "invalid quote request");
   const input = parsed.data;
+  if (input.kind === "fund" && !input.refundTo && !input.dry) {
+    return fail(400, "invalid_request", "send refundTo, your address on that chain, so a failed deposit can come back");
+  }
   try {
     const result =
       input.kind === "fund"
@@ -37,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
             owner: input.owner.toLowerCase(),
             originAsset: input.originAsset,
             amount: BigInt(input.amount),
-            refundTo: input.refundTo,
+            refundTo: input.refundTo ?? null,
             dry: input.dry ?? false,
           })
         : await quote({

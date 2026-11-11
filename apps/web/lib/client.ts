@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { BlockedAction, RailId } from "./types";
+import type { BlockedAction, IntentQuote, IntentToken, RailId } from "./types";
 
 export const KEY_STORAGE = "meridian_key";
 
@@ -114,4 +114,68 @@ export function percent(numerator: bigint, denominator: bigint): string {
   const sign = basis < 0n ? "-" : "";
   const abs = basis < 0n ? -basis : basis;
   return `${sign}${abs / 100n}.${(abs % 100n).toString().padStart(2, "0")}%`;
+}
+
+export const CHAINS: Record<string, { name: string; evm: number | null }> = {
+  base: { name: "Base", evm: 8453 },
+  eth: { name: "Ethereum", evm: 1 },
+  arb: { name: "Arbitrum", evm: 42161 },
+  op: { name: "Optimism", evm: 10 },
+  pol: { name: "Polygon", evm: 137 },
+  bsc: { name: "BNB Chain", evm: 56 },
+  avax: { name: "Avalanche", evm: 43114 },
+  sol: { name: "Solana", evm: null },
+  btc: { name: "Bitcoin", evm: null },
+  tron: { name: "TRON", evm: null },
+  ton: { name: "TON", evm: null },
+  sui: { name: "Sui", evm: null },
+  aptos: { name: "Aptos", evm: null },
+  stellar: { name: "Stellar", evm: null },
+  xrp: { name: "XRP Ledger", evm: null },
+  gnosis: { name: "Gnosis", evm: 100 },
+  bera: { name: "Berachain", evm: 80094 },
+  scroll: { name: "Scroll", evm: 534352 },
+  monad: { name: "Monad", evm: 143 },
+  xlayer: { name: "X Layer", evm: 196 },
+  plasma: { name: "Plasma", evm: 9745 },
+  hood: { name: "Robinhood Chain", evm: 4663 },
+  doge: { name: "Dogecoin", evm: null },
+  ltc: { name: "Litecoin", evm: null },
+  bch: { name: "Bitcoin Cash", evm: null },
+  zec: { name: "Zcash", evm: null },
+  dash: { name: "Dash", evm: null },
+  cardano: { name: "Cardano", evm: null },
+  starknet: { name: "Starknet", evm: null },
+};
+
+export function chainName(code: string): string {
+  return CHAINS[code]?.name ?? code.toUpperCase();
+}
+
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+export type EvmTransfer = { from: string; to: string; value: string } | { from: string; to: string; data: string };
+
+export function evmTransfer(from: string, depositAddress: string, amount: bigint, contract: string | null): EvmTransfer {
+  if (!EVM_ADDRESS.test(depositAddress) || (contract !== null && !EVM_ADDRESS.test(contract))) throw new Error("not an EVM address");
+  if (amount <= 0n || amount >= 2n ** 256n) throw new Error("amount out of range");
+  if (contract === null) return { from, to: depositAddress, value: `0x${amount.toString(16)}` };
+  const word = (hex: string) => hex.toLowerCase().padStart(64, "0");
+  return { from, to: contract, data: `0xa9059cbb${word(depositAddress.slice(2))}${word(amount.toString(16))}` };
+}
+
+export function paymentUri(token: IntentToken, quote: IntentQuote): string | null {
+  const address = quote.depositAddress;
+  if (!address || quote.depositMemo) return null;
+  const chain = CHAINS[token.blockchain]?.evm;
+  if (chain) {
+    return token.contractAddress
+      ? `ethereum:${token.contractAddress}@${chain}/transfer?address=${address}&uint256=${quote.amountIn}`
+      : `ethereum:${address}@${chain}?value=${quote.amountIn}`;
+  }
+  if (token.blockchain === "sol") {
+    return `solana:${address}?amount=${quote.amountInFormatted}${token.contractAddress ? `&spl-token=${token.contractAddress}` : ""}`;
+  }
+  if (token.blockchain === "btc") return `bitcoin:${address}?amount=${quote.amountInFormatted}`;
+  return null;
 }

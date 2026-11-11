@@ -242,13 +242,25 @@ export const deviceStatusSchema: z.ZodType<DeviceStatus> = z.object({
 
 const intentStatus: z.ZodType<IntentStatus> = z.enum(["PENDING_DEPOSIT", "PROCESSING", "SUCCESS", "INCOMPLETE_DEPOSIT", "REFUNDED", "FAILED"]);
 
-export const intentTokensSchema = list<IntentToken>(z.object({ assetId: z.string(), symbol: z.string(), blockchain: z.string() }));
+export const intentTokensSchema = list<IntentToken>(
+  z.object({
+    assetId: z.string(),
+    symbol: z.string(),
+    blockchain: z.string(),
+    decimals: z.number(),
+    contractAddress: z.string().nullable(),
+  }),
+);
 export const intentQuoteSchema: z.ZodType<IntentQuote> = z.object({
-  depositAddress: z.string(),
+  depositAddress: z.string().nullable(),
+  depositMemo: z.string().nullable(),
   amountIn: int,
+  amountInFormatted: z.string(),
   amountOut: int,
-  deadline: z.string(),
+  amountOutFormatted: z.string(),
+  deadline: z.string().nullable(),
 });
+export const returnedSchema = z.object({ returned_usd_micro: int });
 export const intentStatusSchema = z.object({ status: intentStatus });
 
 export const listingsSchema: z.ZodType<SellerListings> = z.object({

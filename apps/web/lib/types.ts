@@ -341,13 +341,18 @@ export type IntentToken = {
   assetId: string;
   symbol: string;
   blockchain: string;
+  decimals: number;
+  contractAddress: string | null;
 };
 
 export type IntentQuote = {
-  depositAddress: string;
+  depositAddress: string | null;
+  depositMemo: string | null;
   amountIn: string;
+  amountInFormatted: string;
   amountOut: string;
-  deadline: string;
+  amountOutFormatted: string;
+  deadline: string | null;
 };
 
 export type IntentStatus =

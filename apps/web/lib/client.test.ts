@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ago, fundingPercent, percent, sentence, usd } from "./client.ts";
+import { ago, evmTransfer, fundingPercent, paymentUri, percent, sentence, usd } from "./client.ts";
 
 test("sentence turns router errors into sentences", () => {
   assert.equal(sentence("credential rejected by the rail"), "Credential rejected by the rail.");
@@ -34,4 +34,32 @@ test("ago switches units at 90 seconds and 90 minutes", () => {
   assert.equal(ago(42), "42s ago");
   assert.equal(ago(272), "5 min ago");
   assert.equal(ago(7200), "2 h ago");
+});
+
+test("evmTransfer sends the native amount, or an ERC-20 transfer to the deposit address", () => {
+  const deposit = "0x2527D02599Ba641c19FEa793cD0F167589a0f10D";
+  assert.deepEqual(evmTransfer("0xfrom", deposit, 2_464_810_690_364_382n, null), {
+    from: "0xfrom",
+    to: deposit,
+    value: "0x8c1bb75a343de",
+  });
+  assert.deepEqual(evmTransfer("0xfrom", deposit, 5_050_000n, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"), {
+    from: "0xfrom",
+    to: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    data: "0xa9059cbb0000000000000000000000002527d02599ba641c19fea793cd0f167589a0f10d00000000000000000000000000000000000000000000000000000000004d0e90",
+  });
+  assert.throws(() => evmTransfer("0xfrom", "bc1qdeposit", 1n, null));
+  assert.throws(() => evmTransfer("0xfrom", deposit, 0n, null));
+});
+
+test("paymentUri follows EIP-681, Solana Pay and BIP-21, and stays empty when a memo is needed", () => {
+  const quote = { depositAddress: "0xdep", depositMemo: null, amountIn: "5050000", amountInFormatted: "5.05", amountOut: "5000000", amountOutFormatted: "5.0", deadline: null };
+  const usdcBase = { assetId: "a", symbol: "USDC", blockchain: "base", decimals: 6, contractAddress: "0x8335" };
+  assert.equal(paymentUri(usdcBase, quote), "ethereum:0x8335@8453/transfer?address=0xdep&uint256=5050000");
+  assert.equal(paymentUri({ ...usdcBase, symbol: "ETH", blockchain: "arb", contractAddress: null }, quote), "ethereum:0xdep@42161?value=5050000");
+  assert.equal(paymentUri({ ...usdcBase, blockchain: "sol", contractAddress: "EPjF" }, quote), "solana:0xdep?amount=5.05&spl-token=EPjF");
+  assert.equal(paymentUri({ ...usdcBase, symbol: "BTC", blockchain: "btc", contractAddress: null }, quote), "bitcoin:0xdep?amount=5.05");
+  assert.equal(paymentUri({ ...usdcBase, blockchain: "stellar" }, { ...quote, depositMemo: "123" }), null);
+  assert.equal(paymentUri({ ...usdcBase, blockchain: "ton" }, quote), null);
+  assert.equal(paymentUri(usdcBase, { ...quote, depositAddress: null }), null);
 });
