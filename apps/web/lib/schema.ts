@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   check,
   customType,
@@ -36,11 +37,14 @@ export const keys = pgTable(
     balanceUsdMicro: bigint("balance_usd_micro", { mode: "bigint" }).notNull().default(sql`0`),
     reservedUsdMicro: bigint("reserved_usd_micro", { mode: "bigint" }).notNull().default(sql`0`),
     defaultModel: text("default_model"),
+    parentId: uuid("parent_id").references((): AnyPgColumn => keys.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
     check("keys_balance_non_negative", sql`${t.balanceUsdMicro} >= 0`),
     check("keys_reserved_non_negative", sql`${t.reservedUsdMicro} >= 0`),
+    index("keys_parent_idx").on(t.parentId),
   ],
 );
 
