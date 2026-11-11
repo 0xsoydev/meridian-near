@@ -16,7 +16,7 @@ function close(target: EventTarget) {
 }
 
 export function TradeNav() {
-  const { accountId, connect, disconnect } = useNear();
+  const { accountId, address, connect, disconnect } = useNear();
   const pathname = usePathname();
 
   useEffect(() => {
@@ -64,8 +64,8 @@ export function TradeNav() {
           {accountId ? (
             <details className="group relative">
               <summary className={`${SECONDARY} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
-                <span title={accountId} className="max-w-[132px] truncate lg:max-w-[180px]">
-                  {shortAccount(accountId)}
+                <span title={address ?? accountId} className="max-w-[132px] truncate lg:max-w-[180px]">
+                  {shortAccount(address ?? accountId)}
                 </span>
                 <ChevronDown aria-hidden className="size-4 transition-transform duration-200 ease-brand group-open:rotate-180" />
               </summary>

@@ -142,7 +142,8 @@ function Venue() {
 }
 
 export default function WalletPage() {
-  const { accountId, connect, sign, send, evmWallets: wallets } = useNear();
+  const { accountId, address: own, kind, connect, sign, send, evmWallets: wallets } = useNear();
+  const viaNear = kind === null || kind === "near";
   const [balances, setBalances] = useState<Balances | null>(null);
   const [keys, setKeys] = useState<KeySummary[] | null>(null);
   const [usage, setUsage] = useState<OwnerUsage[]>([]);
@@ -177,6 +178,16 @@ export default function WalletPage() {
       setAsset(external.find((token) => token.blockchain === "base" && token.symbol === "USDC")?.assetId ?? external[0]?.assetId ?? "");
     });
   }, []);
+
+  useEffect(() => {
+    if (!viaNear) setRoute("chain");
+  }, [viaNear]);
+
+  useEffect(() => {
+    const token = tokens.find((item) => item.assetId === asset);
+    const fits = token !== undefined && ((kind === "evm" && (CHAINS[token.blockchain]?.evm ?? null) !== null) || (kind === "solana" && token.blockchain === "sol"));
+    if (own) setAddress((current) => (current === "" || current === own ? (fits ? own : "") : current));
+  }, [asset, tokens, kind, own]);
 
   const readWallet = useCallback(async (): Promise<Balances | null> => {
     if (!accountId) return null;
@@ -563,7 +574,7 @@ export default function WalletPage() {
         <p className="text-[14px] leading-[22px] text-muted">
           USDC on {CORE || "core"}, held for{" "}
           <a href={explorer("address", accountId)} target="_blank" rel="noreferrer" className={`${LINK} text-ink`}>
-            {accountId}
+            {own ?? accountId}
           </a>
           {balances && balances.near > 0n ? (
             <>
@@ -588,18 +599,20 @@ export default function WalletPage() {
               { value: "withdraw", label: "Withdraw" },
             ]}
           />
-          <Toggle
-            label="Route"
-            value={route}
-            onChange={(next) => {
-              setRoute(next);
-              startOver();
-            }}
-            items={[
-              { value: "near", label: direction === "deposit" ? "From NEAR" : "To NEAR" },
-              { value: "chain", label: direction === "deposit" ? "From another chain" : "To another chain" },
-            ]}
-          />
+          {viaNear ? (
+            <Toggle
+              label="Route"
+              value={route}
+              onChange={(next) => {
+                setRoute(next);
+                startOver();
+              }}
+              items={[
+                { value: "near", label: direction === "deposit" ? "From NEAR" : "To NEAR" },
+                { value: "chain", label: direction === "deposit" ? "From another chain" : "To another chain" },
+              ]}
+            />
+          ) : null}
           {route === "chain" ? (
             tokens.length === 0 ? (
               <p className="text-[13px] text-muted">Reading the chains NEAR Intents supports.</p>

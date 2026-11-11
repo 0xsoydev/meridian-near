@@ -6,13 +6,8 @@ export const KEY_STORAGE = "meridian_key";
 export const ETH_ACCOUNT = /^0x[0-9a-f]{40}$/;
 
 export function shortAccount(id: string): string {
-  return ETH_ACCOUNT.test(id) ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
-}
-
-export function nearAmount(yocto: bigint): string {
-  const units = yocto / 10n ** 20n;
-  const fraction = (units % 10_000n).toString().padStart(4, "0").replace(/0+$/, "");
-  return `${units / 10_000n}${fraction ? `.${fraction}` : ""}`;
+  if (ETH_ACCOUNT.test(id)) return `${id.slice(0, 6)}…${id.slice(-4)}`;
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(id) ? `${id.slice(0, 4)}…${id.slice(-4)}` : id;
 }
 
 export const RAIL_NAMES: Record<RailId, string> = {
