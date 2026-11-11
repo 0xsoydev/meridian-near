@@ -58,6 +58,7 @@ Static config, one entry per provider. The `0g` rail and `resetPeriod` go. No re
 | `core.<team>.near`, Rust (near-sdk) | wallets, per-agent limits, perps, index, public fill log | `defi`, `agents` |
 | Native USDC on NEAR | the only money | all |
 | NEAR accounts and NEP-413 | sign-in, listings, key creation | all |
+| Ethereum wallets on NEAR (NEP-518) | MetaMask and other Ethereum wallets own a `0x…` NEAR account; they sign with EIP-191 | all |
 | `set_cap` and `pull` | agent spending limits enforced by the contract | `agents` |
 | Function-call keys on `ops` | the servers can pull, post, log, liquidate and pay out, never withdraw | `agents` |
 | NEAR Intents 1Click | fund `core` from any chain, withdraw to any chain, `dry` quotes for judges | `defi`, `agents` |
@@ -320,12 +321,15 @@ Perp fees and the 10 % take land in `treasury`. The owner takes revenue with `pa
 ### 9.13 Wallet-signed mutations (`lib/auth.ts`)
 
 ```ts
-export type Signed = { account_id: string; public_key: string; signature: string; nonce: string; message: string };
+export type Signed =
+  | { account_id: string; public_key: string; signature: string; nonce: string; message: string }
+  | { account_id: string; signature: string; message: string };
 export function verifySigned(envelope: unknown, host: string, action: string): Promise<{ account: string; intent: Record<string, unknown> } | null>;
 ```
 
 - The message is `JSON.stringify({ domain, action, issued_at, ...intent })`. The NEP-413 payload is `{ message, recipient: host, nonce }`, with a 32-byte random nonce.
 - `verifyMessage` from `near-api-js/nep413` checks the signature and that the key is a full-access key of the account (over RPC).
+- A `0x…` account belongs to an Ethereum wallet through NEP-518 and has no full-access key. It signs the same message with `personal_sign` (EIP-191) and sends `{ account_id, signature, message }`. The server recovers the signer with `@noble/curves` and keccak-256 and accepts it only when the address equals `account_id`.
 - The domain, action and 5-minute window rules are unchanged, and `client_nonce` uniques still block replays.
 - Actions: `create_key`, `list_keys`, `revoke_key`, `return_float`, `list`, `amend`, `cancel`.
 
@@ -429,6 +433,8 @@ Removed: every `HEDERA_*`, `HCS_TOPIC_ID`, `X402_FACILITATOR_URLS`, `MIRROR_NODE
   - a leaked keeper key can move the index 10 % a minute and pay out the treasury;
   - neither can withdraw from a wallet.
 - NEP-413: the recipient is pinned to the host, the key must be full-access, signatures expire after 5 minutes, nonces are unique per intent.
+- EIP-191, for `0x…` accounts only: the recovered address must equal the account, with the same host, action and 5-minute rules.
+- Ethereum wallets sign in through NEAR Connect's `ethereum-wallets` entry, renamed "MetaMask and other Ethereum wallets" and listed first. Its relayer pays only the one-time setup. Every later NEAR transaction pays fees from the `0x…` account, so `send()` checks the balance first and says how much NEAR to add instead of opening the wallet.
 - No prompts or completions are stored. NEAR AI proofs hold hashes and signatures only.
 - No secrets in the repo.
 
