@@ -15,7 +15,15 @@ All endpoints are under `/api/v1`. Authenticate with `Authorization: Bearer rk_â
 - [Chat completions](/api/v1/chat/completions): OpenAI-compatible, `stream: true` supported. Set `OPENAI_BASE_URL` to `$MERIDIAN/api/v1` and `OPENAI_API_KEY` to the router key. `model` is an id from the model list, or `cheapest:a,b,c` to route to the cheapest live ask among a shortlist (the `X-Router-Model` header names the pick). A request spends MTokens the key holds first, then the key's float, then pulls from the wallet within the daily limit.
 - [Models](/api/v1/models): every model with its rails, list price (`reference_blended_micro_per_mtok`), list ceiling, best ask and available tokens. Rails with `verifiability: "tee"` are served through NEAR AI and come back with signed proofs.
 - [Usage](/api/v1/usage): the key's last 100 calls with tokens, rail, charge, whether prepaid MTokens or the float paid, and whether a proof was recorded.
-- [Account](/api/v1/me): wallet, float, reserved amount, today's limit (`cap.per_day_usd_micro`, `cap.used_today_usd_micro`, `cap.left_usd_micro`), prepaid tokens and open orders.
+- [Account](/api/v1/me): wallet, float, reserved amount, today's limit (`cap.per_day_usd_micro`, `cap.used_today_usd_micro`, `cap.left_usd_micro`), prepaid tokens and open orders. The owner can move a key's unspent float back to their Meridian wallet from `/wallet`; the key keeps working.
+
+## Swarms
+
+- [Swarm skill](/skills/meridian-swarm/SKILL.md) runs one task on several models at once, each model as its own OpenCode sub-agent in its own git worktree, and brings back one patch per model. Install it next to your other skills, into `~/.claude/skills/meridian-swarm` for Claude Code or `~/.agents/skills/meridian-swarm` for OpenCode and Codex: `curl -fsSL -O "$MERIDIAN/skills/meridian-swarm/SKILL.md" -O "$MERIDIAN/skills/meridian-swarm/swarm.ts"`.
+- [Start](/api/v1/swarm): `POST { agents | models, budget_usd_micro, minutes? }` moves the budget from your key's float into one child key per model, an even share each, and answers `{ agents: [{ key, key_id, model, rail, ask_micro_per_mtok }], share_usd_micro, expires_at }`. `agents` (1 to 8) takes the cheapest models with a live ask; fewer live models run fewer agents. A short float tops up once inside your daily limit, or answers 403 or 402 as below.
+- A child key only runs inference. It never tops up, answers 402 when its share is spent, 403 on `/trades` and `/sells`, and 401 after `expires_at`.
+- [Status](/api/v1/swarm): `GET` lists your swarm agents from the last day with what each spent and has left.
+- [End](/api/v1/swarm): `DELETE { key_ids }` ends them now and answers `{ returned_usd_micro }`, what they didn't spend, back on your key's float. A swarm nobody ends comes back within a minute of `expires_at`.
 
 ## When a human is needed
 

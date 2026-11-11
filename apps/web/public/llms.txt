@@ -6,4 +6,5 @@
 
 - [Agent manual](/skill.md): getting a key through the device flow, the two environment variables, inference, trading MTokens, perps, and what to do when a human is needed.
 - [Agents](/agents): the same setup, step by step, for people.
+- [Swarm skill](/skills/meridian-swarm/SKILL.md): run one task on several models at once, one OpenCode sub-agent and one patch per model.
 - [Receipts](/receipts): fill rollups, the index recompute, NEAR AI proofs and payouts.
