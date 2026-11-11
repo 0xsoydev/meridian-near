@@ -116,10 +116,11 @@ apps/web/
   app/a/[code]/page.tsx        approve an agent, or a higher limit
   app/api/v1/…, app/api/listings/…
   public/skill.md              the manual agents read
+  public/skills/meridian-swarm/ SKILL.md and swarm.mjs: the swarm skill agents install (§9.14)
   lib/near.ts                  RPC, core views and calls, ops accounts, NEP-413 verify, tx status
   lib/pay.ts                   float top-up, 402/403 bodies (replaces x402.ts)
   lib/approvals.ts             device codes and limit raises (World removed)
-  lib/intents.ts               1Click quotes and status
+  lib/intents.ts               1Click quotes, status and deposit submits, in any token
   lib/rollup.ts                minute rollups (moved from hcs.ts) and index math
   lib/perp.ts, lib/payouts.ts  rewired to core
   kept, edited where §8–§10 say: price, rails, book, bids, offers, ledger, listings, accounts, auth, secrets, schema, db, errors, types, utils, testkit
@@ -172,8 +173,11 @@ Baseline §6, plus:
 | POST, GET | `/api/v1/keys` | NEP-413 `create_key`, `list_keys` | create a key, or list the owner's keys with their last 50 requests |
 | DELETE | `/api/v1/keys/{id}` | NEP-413 `revoke_key` | revoke; the float becomes a refund payout (§9.4) |
 | PATCH | `/api/v1/keys/settings` | `Bearer rk_` | `default_model` only |
-| POST | `/api/v1/quotes` | none | 1Click quote to fund or withdraw; `dry` unless `execute:true` (§9.11) |
-| GET | `/api/v1/quotes/{deposit_address}` | none | 1Click status |
+| POST | `/api/v1/quotes` | none | 1Click quote to fund or withdraw in any token; `dry:true` previews, and testnet always previews (§9.11) |
+| GET | `/api/v1/quotes/{deposit_address}?memo=` | none | 1Click status; `memo` when the quote carried one |
+| POST | `/api/v1/quotes/{deposit_address}` | none | `{tx_hash, memo?}` tells 1Click the deposit was sent |
+| POST | `/api/v1/keys/return` | NEP-413 `return_float` | `{key_id}` → moves the key's free balance to the owner's Meridian wallet; the key keeps working (§9.4) |
+| POST, GET, DELETE | `/api/v1/swarm` | `Bearer rk_` | start a swarm, read its agents' spend, end it and return the leftover (§9.14) |
 | GET | `/api/v1/perps/account?account=` | none | wallet, positions, equity, liquidation prices from `core` |
 | GET | `/api/v1/perps/market?model=` | none | the market view, the open-interest cap and its recent index posts |
 | GET, POST | `/api/v1/perps/history` | none | an account's `position_modified` and `liquidated` events, newest first; POST takes up to four transaction hashes, reads their outcomes over RPC and stores the events `core` itself emitted, so nothing a caller sends can forge one; the keeper records its liquidations |
@@ -209,7 +213,7 @@ Many OpenAI clients show only `error.message`, so the message carries the link. 
 Baseline §9 steps 1–12, with these changes:
 - Step 5 (x402 settle) is gone.
 - Step 6 has no market-ask fallback.
-- Step 8: a short float calls `topUp(key, need)` (§9.4) and retries the reservation once. A refusal returns §8.2.
+- Step 8: a short float calls `topUp(key, need)` (§9.4) and retries the reservation once. A refusal returns §8.2. A swarm key never tops up: it answers 402 `insufficient_balance`, "this swarm agent has spent its share of the budget".
 - Step 9: `near-ai` adds `x-no-aliasing: true` and `Accept-Encoding: identity`.
 - After the response, in `after()`: a float under `LOW_FLOAT_MICRO` refills in the background, and `near-ai` responses get their proof stored (§9.12).
 
@@ -233,7 +237,8 @@ Baseline §9 steps 1–12, with these changes:
 - Deposit: `ft_transfer_call(core, amount, {"fund":{}})`, or from any chain (§9.11).
 - Withdraw: to the connected account (with `storage_deposit` on USDC first if it isn't registered), or to any chain.
 - Create a key: a NEP-413 `create_key` returns the `rk_` once, and `set_cap(key_id, per_day)` follows in the same flow.
-- Each key shows its name, limit, today's use and float, with Raise (`set_cap`) and Revoke (`set_cap(key, 0)`, then `DELETE`).
+- Each key shows its name, limit, today's use and float, with Raise (`set_cap`), Move to wallet (`return_float`) and Revoke (`set_cap(key, 0)`, then `DELETE`).
+- Swarm agents show under the key that started them, with their balance and when they end, until their leftover is back.
 
 ### 9.3 Raising a limit
 
@@ -249,7 +254,8 @@ export function reconcile(): Promise<number>;
 - Each instance runs at most one top-up per key at a time (a `Map<keyId, Promise>`).
 - Read `cap(owner, cap_key)` and `wallet(owner)`. `amount = min(max(PULL_MICRO, need − float), left, wallet)`, with `DEMO_PULL_MICRO` for demo keys. When `amount < need − float`: 403 if the limit is the shortfall, 402 if the wallet is.
 - Sign `core.pull(owner, cap_key, amount)` with the web key, send it, then add `amount` to the float in one statement. A contract refusal returns the matching 402 or 403.
-- Revoke: one statement zeroes the float (nothing reserved, no open bid or offer), invalidates the hash and inserts a `refund` payout for the owner, which the keeper pays (§9.10). Prepaid MTokens on the key are forfeited, and the page warns first.
+- Revoke: one statement zeroes the float (nothing reserved, no open bid or offer, no running swarm and no swarm leftover on its way back), invalidates the hash and inserts a `refund` payout for the owner, which the keeper pays (§9.10). Prepaid MTokens on the key are forfeited, and the page warns first.
+- Move to wallet: the same statement without touching the hash. It moves the free float only; reserved amounts settle first. The keeper pays the refund within a minute.
 - Demo keys share `cap_key = "demo"` on `NEAR_OWNER_ID`'s wallet, with a $2/day limit.
 
 ### 9.5 Sellers (`/sell`)
@@ -291,17 +297,19 @@ Perp fees and the 10 % take land in `treasury`. The owner takes revenue with `pa
 
 ### 9.11 Any chain in and out (`lib/intents.ts`)
 
+- **Tokens.** Every token 1Click lists outside NEAR, deprecated ones dropped, grouped by chain on the page with USDC first.
 - **Fund.** `POST /v0/quote` with:
-  - `dry`, `swapType:"EXACT_OUTPUT"`, `amount`, `slippageTolerance:100`, `deadline` one hour out;
-  - `originAsset` = the chosen chain's USDC, `depositType:"ORIGIN_CHAIN"`;
+  - `dry`, `swapType:"EXACT_OUTPUT"`, `amount` in USDC, `slippageTolerance:100`, `deadline` one hour out;
+  - `originAsset` = the chosen token, `depositType:"ORIGIN_CHAIN"`, `depositMode:"MEMO"` on Stellar and `"SIMPLE"` elsewhere;
   - `destinationAsset:"nep141:<NEAR_USDC_ID>"`, `recipient:NEAR_CORE_ID`, `recipientType:"DESTINATION_CHAIN"`;
   - `customRecipientMsg:{"fund":{"to":"<owner>"}}`;
   - `refundTo` = the user's address on the origin chain, `refundType:"ORIGIN_CHAIN"`.
 
-  The page shows the deposit address and a QR, then polls `GET /v0/status` and shows every outcome. The credit happens on-chain in `ft_on_transfer`.
-- **Withdraw.** Quote from `nep141:<NEAR_USDC_ID>` to the user's address on the target chain, `refundTo` = the user's NEAR account. One prompt: `usdc.storage_deposit(deposit_address)`, then `core.withdraw(amount, deposit_address)`.
+  The page shows "You send X on Y. $Z USDC lands in your Meridian wallet", the deposit address, the memo when 1Click returns one (with "Include this memo or the deposit can't be credited"), and a QR. The QR and the phone link carry a payment request where a standard exists (EIP-681 on EVM chains, Solana Pay, BIP-21) and no memo is needed; otherwise the plain address. It polls `GET /v0/status` (with the memo) and shows every outcome. The credit happens on-chain in `ft_on_transfer`.
+- **Pay with a wallet.** Browser wallets announce themselves through EIP-6963, so the page lists every installed EVM wallet by its own name and icon, with no wallet library. On an EVM chain the page asks the wallet for its address (the refund address), quotes, switches the chain, and sends the native amount or an ERC-20 `transfer(depositAddress, amountIn)`. Then `POST /v0/deposit/submit` with the hash, and the status polling takes over. Every step has words: confirm in the wallet, switch chains, cancelled ("Nothing was sent"), paid and waiting for the chain, converting, done, refunded.
+- **Withdraw.** Quote from `nep141:<NEAR_USDC_ID>` to the chosen token at the user's address, `refundTo` = the user's NEAR account. One prompt: `usdc.storage_deposit(deposit_address)`, then `core.withdraw(amount, deposit_address)`.
 - `customRecipientMsg` is marked experimental, so the first real run moves 0.2 USDC. Fallback: deliver to the owner's NEAR account, then one `ft_transfer_call`.
-- Testnet shows `dry` quotes only. The UI minimum is $1. `ONECLICK_API_KEY` is optional and lowers the fee.
+- Testnet: 1Click only knows mainnet, so testnet quotes are always `dry` and use mainnet USDC and `intents.near` in place of `core` and the user's account. They are price previews; the page says deposits from other chains run on mainnet and disables the wallet buttons. The UI minimum is $1. `ONECLICK_API_KEY` is optional and lowers the fee.
 
 ### 9.12 NEAR AI proofs
 
@@ -319,7 +327,23 @@ export function verifySigned(envelope: unknown, host: string, action: string): P
 - The message is `JSON.stringify({ domain, action, issued_at, ...intent })`. The NEP-413 payload is `{ message, recipient: host, nonce }`, with a 32-byte random nonce.
 - `verifyMessage` from `near-api-js/nep413` checks the signature and that the key is a full-access key of the account (over RPC).
 - The domain, action and 5-minute window rules are unchanged, and `client_nonce` uniques still block replays.
-- Actions: `create_key`, `list_keys`, `revoke_key`, `list`, `amend`, `cancel`.
+- Actions: `create_key`, `list_keys`, `revoke_key`, `return_float`, `list`, `amend`, `cancel`.
+
+### 9.14 Swarms (`app/api/v1/swarm/route.ts`, `public/skills/meridian-swarm/`)
+
+An agent runs one task on several models at once, each model as its own sub-agent, paid from its own key inside the owner's daily limit.
+
+1. `/meridian-swarm 5 "fix the failing parser test"` in Claude Code, Codex or OpenCode runs `swarm.mjs`. Without a key it runs the device flow (§9.1) and keeps the key in `~/.config/meridian/key` (mode 600).
+2. `POST /api/v1/swarm {agents | models, budget_usd_micro, minutes?}` with the agent's key:
+   - `agents` (1 to 8) takes the cheapest distinct models with a live ask; `models` names them. Fewer live models than asked runs fewer, and the answer says so.
+   - `share = budget / count`, at least $0.01. A float short of `share × count` tops up once (§9.4), so a swarm counts against the parent's daily limit like any spend, and a refusal returns §8.2.
+   - One statement debits the parent's float and inserts one child key per model: `parent_id`, `expires_at` (`minutes`, default 60, 5 to 240), the share as its float, no `cap_key`, the model as `default_model`. The answer carries each child's `rk_` once, its model, rail and ask.
+3. `swarm.mjs` makes one git worktree per model under `.swarm/<run>/` from the working tree's state (`git stash create`, or `HEAD`), excluded through `.git/info/exclude`, and writes `.swarm/<run>/.opencode/opencode.json` with a `meridian` provider (`@opencode/ai/providers/openai-compatible`, base URL `<host>/api/v1`, the key from `MERIDIAN_SWARM_KEY`). It starts `opencode run --standalone --auto --model meridian/<model> "<task>"` in each worktree, OpenCode being the only runtime that takes a custom OpenAI-compatible provider today.
+4. While they run it polls `GET /api/v1/swarm` (each child's spend, requests and end time) and redraws one line per agent on a terminal, or prints a line per change when piped or with `NO_COLOR`.
+5. When the last one exits, or on Ctrl-C, it writes each worktree's change to `.swarm/<run>/<n>.patch`, optionally runs `--check "<cmd>"` in each worktree, calls `DELETE /api/v1/swarm {key_ids}` and prints the summary, how to apply a patch, and one JSON line for the host agent.
+6. `DELETE` sets `expires_at = now()` and moves every ended child's free float back to the parent in one statement. The keeper runs the same statement every minute for swarms nobody ended, and for amounts that settle after the end.
+
+A child key answers 401 after `expires_at`, never tops up, and can only run inference: `/trades` and `/sells` answer 403, so no MTokens or orders are left on a key that ends.
 
 ## 10. Keeper (`keeper/main.ts`, `jobs.ts`)
 
@@ -330,7 +354,7 @@ One Node process. Each loop catches its own errors and never overlaps itself.
 | 60 s | `publishRollups` → `core.log_rollups` |
 | 180 s, or woken | `postIndexes` → `core.post` |
 | 30 s | `liquidateUnderwater`: `core.liquidatable`, then `core.liquidate` |
-| 60 s | `releaseStale`, `matchAllBids` (unchanged) |
+| 60 s | `releaseStale`, `returnSwarmFloats`, `matchAllBids` |
 | 60 s | `dailyClose`: `closeDay`, then `payPending` |
 
 `resetDailyListings`, `checkScheduled` and the perp log scan are removed. The keeper signs with `NEAR_KEEPER_KEY`.
@@ -342,6 +366,8 @@ The agent holds no NEAR key:
 2. `new OpenAI({ baseURL: ROUTER_URL + "/api/v1", apiKey })`, then stream a loop of tasks, printing the `X-Meridian-*` headers.
 3. Buy 1 MTok on `/trades` when the best ask is under the index; sell half on `/sells`.
 4. On a 403, print `action` and poll `/me` until the limit has room again.
+5. `RUNAWAY=1` plays a runaway agent: it sends requests in a loop, prints what each cost and what is left of today's limit, and stops at the 403 with the approval link. `STUB_TOKENS` makes the stub rail report that many tokens per request, so the limit runs out in a few dozen requests.
+6. `STUB_SHELL="<command>"` makes the stub rail answer a request that offers OpenCode's `shell` tool with one call to it, so a local swarm produces real patches without a model key.
 
 ## 12. Frontend
 
@@ -350,7 +376,7 @@ The agent holds no NEAR key:
 | `/` | a live line under the hero (best ask or index against list); example diagrams that play once in view, with Pause (a spare key sold as MTokens, an ask priced under list moving to the front of the book, an agent's daily limit and its raise, a perp hedge from `payoffLadder`, the index recompute from `recomputeIndex`); one request from limit to seller payout, pinned while its four steps scroll past on wide screens; "Use from your terminal" with the one-line `skill.md` prompt and a terminal that loops approve, buy, inference and sell; "Three ways in" with real captures of `/wallet`, `/sell` and `/perps`; under reduced motion every diagram shows its last frame and nothing advances |
 | `/agents` | the terminal guide: `skill.md`, the device flow, demo keys, what an agent can and cannot do |
 | `/a/[code]` | approve an agent or a higher limit: name, limit, wallet, one prompt to fund and approve, or deny |
-| `/wallet` | the Meridian wallet (deposit, withdraw, any chain), agents and keys behind one `list_keys` signature reused for four minutes (limit, used, float, raise, revoke), create a key and set its limit, recent requests |
+| `/wallet` | the Meridian wallet (deposit, withdraw, any token on any chain, pay with an EVM wallet, a payment QR), agents and keys behind one `list_keys` signature reused for four minutes (limit, used, float, raise, move to wallet, revoke), swarm agents under their parent, create a key and set its limit, recent requests |
 | `/trade` | baseline §14; a short float refills from the owner's wallet; size presets, keys B/S/M/L/`/`, prefill from `?model=&side=&size=&limit=` |
 | `/perps` | baseline §14; margin from the Meridian wallet, a payoff table at ±5/10/20 %, history from `perp_events` with explorer links, keys B/S/[/]/`/`, prefill from `?model=&side=&size=&leverage=` |
 | `/sell` | wallet → provider → key → model → price → capacity → one signature; earnings and payouts |
@@ -363,7 +389,8 @@ The agent holds no NEAR key:
   - `/me` and the response headers;
   - buying and selling with `/book`, `/trades` and `/sells`;
   - on a 402 or 403: show the link and QR, then poll;
-  - never asking a human for a private key.
+  - never asking a human for a private key;
+  - swarms: installing the skill and the three `/swarm` calls.
 
 UX rules:
 - One wallet prompt per job.
@@ -454,6 +481,12 @@ The demo path freezes Sat 14 at 12:00 UTC.
 - Revoking a key forfeits its prepaid MTokens. Its float is refunded by the next keeper payout.
 - A payout is marked `executed` after the call returns; the payout id travels in the on-chain `payout` event, and the database keeps no transaction hash.
 - Demo keys share one $2/day limit.
+- Paying from a wallet in the page covers EVM chains. Solana, Bitcoin and the rest pay to the address, by QR or the phone link.
+- A swarm's budget leaves the parent's float when it starts and comes back when it ends, or within a minute of `expires_at`.
+
+**Swarms**
+- Sub-agents run as `opencode run --auto` in their worktrees: they edit files and run commands as the user, on the user's machine. Claude Code and Codex can start a swarm but cannot be its sub-agents, since their custom providers need the Anthropic Messages and OpenAI Responses formats.
+- Patches are taken against the state the swarm started from; nothing is applied to the user's tree.
 
 **NEAR AI**
 - It is house-only.
