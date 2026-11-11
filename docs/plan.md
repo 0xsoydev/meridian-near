@@ -58,7 +58,7 @@ Static config, one entry per provider. The `0g` rail and `resetPeriod` go. No re
 | `core.<team>.near`, Rust (near-sdk) | wallets, per-agent limits, perps, index, public fill log | `defi`, `agents` |
 | Native USDC on NEAR | the only money | all |
 | NEAR accounts and NEP-413 | sign-in, listings, key creation | all |
-| Ethereum wallets on NEAR (NEP-518) | MetaMask and other Ethereum wallets own a `0x…` NEAR account; they sign with EIP-191 | all |
+| Signed orders on `core` | MetaMask, Phantom and any Ethereum or Solana wallet own money on `core` by address and sign limits, withdrawals and perps trades; `core` verifies them | all |
 | `set_cap` and `pull` | agent spending limits enforced by the contract | `agents` |
 | Function-call keys on `ops` | the servers can pull, post, log, liquidate and pay out, never withdraw | `agents` |
 | NEAR Intents 1Click | fund `core` from any chain, withdraw to any chain, `dry` quotes for judges | `defi`, `agents` |
@@ -104,7 +104,7 @@ Not used: Chain Signatures, x402, the Agent API, Sputnik DAO, NEP-245 MTokens.
 |---|---|---|
 | `<team>.near` (`NEAR_OWNER_ID`) | contract owner (deploy, `list_market`, `fund_vault`); takes revenue with `payout` to itself, then `withdraw` | full access, in the team wallet |
 | `core.<team>.near` (`NEAR_CORE_ID`) | the contract, holding all USDC; registered on USDC | full access, kept for upgrades until submission |
-| `ops.<team>.near` (`NEAR_OPS_ID`) | the only caller of `pull`, `post`, `log_rollups` and `payout` | web: function-call key for `pull` (`NEAR_WEB_KEY`); keeper: function-call key for `post`, `log_rollups`, `liquidate`, `payout` (`NEAR_KEEPER_KEY`); full access kept offline |
+| `ops.<team>.near` (`NEAR_OPS_ID`) | the only caller of `pull`, `post`, `log_rollups` and `payout` | web: function-call key for `pull` (`NEAR_WEB_KEY`); keeper: function-call key for `post`, `log_rollups`, `liquidate`, `payout` (`NEAR_KEEPER_KEY`); relay: function-call key for `set_cap_signed`, `withdraw_signed`, `modify_signed` (`NEAR_RELAY_KEY`); full access kept offline |
 
 The web app and the keeper use separate keys so their nonces never collide. Each function-call key has a 1 NEAR gas allowance.
 
@@ -329,7 +329,8 @@ export function verifySigned(envelope: unknown, host: string, action: string): P
 
 - The message is `JSON.stringify({ domain, action, issued_at, ...intent })`. The NEP-413 payload is `{ message, recipient: host, nonce }`, with a 32-byte random nonce.
 - `verifyMessage` from `near-api-js/nep413` checks the signature and that the key is a full-access key of the account (over RPC).
-- A `0x…` account belongs to an Ethereum wallet through NEP-518 and has no full-access key. It signs the same message with `personal_sign` (EIP-191) and sends `{ account_id, signature, message }`. The server recovers the signer with `@noble/curves` and keccak-256 and accepts it only when the address equals `account_id`.
+- An Ethereum wallet owner is their `0x…` address and signs with `personal_sign` (EIP-191); a Solana wallet owner is their public key in hex (a valid NEAR account id, shown in base58) and signs with `solana:signMessage`. Both send `{ account_id, signature, message }`; `signedBy` recovers or verifies the signer with `@noble/curves` and accepts it only when it is `account_id`.
+- Money actions by these owners are signed orders (`lib/orders.ts`): one readable message with the action, the account, the contract, a nonce and an expiry. `POST /api/v1/signed` checks the signature, the expiry (at most an hour out) and the nonce, then calls `set_cap_signed`, `withdraw_signed` or `modify_signed` with `NEAR_RELAY_KEY`. `core` rebuilds the same message and checks the signature itself (`ecrecover` for `0x…`, `ed25519_verify` for 64-hex), so the relay can deliver an order but never change or forge one. `withdraw_signed` registers the recipient on USDC first.
 - The domain, action and 5-minute window rules are unchanged, and `client_nonce` uniques still block replays.
 - Actions: `create_key`, `list_keys`, `revoke_key`, `return_float`, `list`, `amend`, `cancel`.
 
@@ -433,8 +434,10 @@ Removed: every `HEDERA_*`, `HCS_TOPIC_ID`, `X402_FACILITATOR_URLS`, `MIRROR_NODE
   - a leaked keeper key can move the index 10 % a minute and pay out the treasury;
   - neither can withdraw from a wallet.
 - NEP-413: the recipient is pinned to the host, the key must be full-access, signatures expire after 5 minutes, nonces are unique per intent.
-- EIP-191, for `0x…` accounts only: the recovered address must equal the account, with the same host, action and 5-minute rules.
-- Ethereum wallets sign in through NEAR Connect's `ethereum-wallets` entry, renamed "MetaMask and other Ethereum wallets" and listed first. Its relayer pays only the one-time setup. Every later NEAR transaction pays fees from the `0x…` account, so `send()` checks the balance first and says how much NEAR to add instead of opening the wallet.
+- EIP-191 and ed25519, for `0x…` and 64-hex accounts only: the signer must be the account, with the same host, action and 5-minute rules.
+- Signed orders on `core`: a per-owner nonce blocks replays and the expiry bounds delayed delivery; a changed field breaks the signature.
+- The picker finds Ethereum wallets through EIP-6963 and Solana wallets through the Wallet Standard events, with no libraries. NEAR wallets stay behind NEAR Connect.
+- Pay with a Solana wallet: `lib/solana.ts` builds the transfer by hand (system transfer for SOL; idempotent associated-token-account create plus `transferChecked` for tokens). The public Solana RPC refuses browsers, so `/api/v1/solana` relays `getLatestBlockhash` and `getAccountInfo` only.
 - No prompts or completions are stored. NEAR AI proofs hold hashes and signatures only.
 - No secrets in the repo.
 

@@ -6,7 +6,7 @@
 |---|---|---|
 | `<team>.testnet` | owner: deploy, `list_market`, `fund_vault`, takes revenue | full access, in the team wallet |
 | `core.<team>.testnet` | the contract and all USDC | full access, kept for upgrades |
-| `ops.<team>.testnet` | the only caller of `pull`, `post`, `log_rollups`, `liquidate`, `payout` | web: function-call key for `pull`; keeper: function-call key for the rest; full access kept offline |
+| `ops.<team>.testnet` | the only caller of `pull`, `post`, `log_rollups`, `liquidate`, `payout`, and the relay for signed orders | web: function-call key for `pull`; keeper: function-call key for `post`, `log_rollups`, `liquidate`, `payout`; relay: function-call key for `set_cap_signed`, `withdraw_signed`, `modify_signed`; full access kept offline |
 
 Register `core` on USDC before the first deposit:
 
@@ -19,7 +19,7 @@ near contract call-function as-transaction <usdc> storage_deposit \
 
 ## Environment
 
-Copy `.env.example` to `apps/web/.env`. The keeper and the agent read the same file. `NEAR_WEB_KEY` is the web function-call key; `NEAR_KEEPER_KEY` is the keeper's.
+Copy `.env.example` to `apps/web/.env`. The keeper and the agent read the same file. `NEAR_WEB_KEY` is the web function-call key; `NEAR_KEEPER_KEY` is the keeper's; `NEAR_RELAY_KEY` is the relay's. `SOLANA_RPC_URL` is optional; without it Solana calls use the public mainnet RPC.
 
 ## Database
 
@@ -41,6 +41,17 @@ near contract deploy core.<team>.testnet use-file target/near/meridian_core.wasm
   json-args '{"owner":"<team>.testnet","ops":"ops.<team>.testnet","usdc":"<usdc>"}' \
   prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
   network-config testnet sign-with-keychain send
+```
+
+To upgrade a deployed `core` (no state migration is needed), deploy the new wasm without the init call, then give `ops` the relay key and put its private key in `NEAR_RELAY_KEY`:
+
+```sh
+near contract deploy core.<team>.testnet use-file target/near/meridian_core.wasm \
+  without-init-call network-config testnet sign-with-keychain send
+near account add-key ops.<team>.testnet grant-function-call-access \
+  --allowance '1 NEAR' --contract-account-id core.<team>.testnet \
+  --function-names 'set_cap_signed, withdraw_signed, modify_signed' \
+  autogenerate-new-keypair save-to-keychain network-config testnet sign-with-keychain send
 ```
 
 ## Seed
@@ -74,6 +85,7 @@ It publishes rollups every minute, posts the index every three, liquidates every
 11. Move to wallet on `/wallet`: the key's float leaves it and the wallet balance rises within a minute.
 12. Deposit from another chain on `/wallet`: on testnet a token on Solana shows a real mainnet price; paying needs mainnet.
 13. `RK_KEY=<key> pnpm --filter web exec node --experimental-strip-types scripts/e2e.ts` checks the swarm money path: spent plus returned equals the budget.
+14. Connect MetaMask or Phantom from the picker, approve an agent with one signature, and on mainnet pay a deposit with the same wallet. `GET /api/v1/signed?owner=<id>` shows the owner's next nonce.
 
 ## Recovery
 
