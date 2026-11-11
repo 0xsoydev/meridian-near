@@ -14,6 +14,7 @@ import {
 } from "react";
 import { z } from "zod";
 import { FOCUS, ICON, LINK } from "../../components/kit";
+import { baseEncode } from "near-api-js";
 import { ETH_ACCOUNT, api } from "../../lib/client";
 import { orderText, type Order } from "../../lib/orders";
 import { signedNonceSchema, signedResultSchema } from "../../lib/wire";
@@ -75,6 +76,8 @@ type Near = {
   address: string | null;
   kind: Connection["kind"] | null;
   evmWallets: EvmWallet[];
+  solanaWallets: Array<{ name: string; icon: string }>;
+  solanaSend: (name: string, build: (payer: string) => Promise<Uint8Array>) => Promise<string>;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   sign: (action: string, intent?: Record<string, unknown>) => Promise<Signed | null>;
@@ -236,6 +239,7 @@ export function Providers({ children }: { children: ReactNode }) {
   const [problem, setProblem] = useState<string | null>(null);
   const connector = useRef<NearConnector | null>(null);
   const live = useRef<Connection | null>(null);
+  const solanaList = useRef<SolanaWallet[]>([]);
   const dialog = useRef<HTMLDialogElement | null>(null);
 
   const use = useCallback((next: Connection | null) => {
@@ -270,6 +274,7 @@ export function Providers({ children }: { children: ReactNode }) {
         const wallet = solanaWallet(raw);
         if (!wallet || solana.some((item) => item.name === wallet.name)) continue;
         solana.push(wallet);
+        solanaList.current = [...solana];
         setSolanaWallets([...solana]);
       }
       return () => undefined;
@@ -439,18 +444,37 @@ export function Providers({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const solanaSend = useCallback(async (name: string, build: (payer: string) => Promise<Uint8Array>): Promise<string> => {
+    const wallet = solanaList.current.find((item) => item.name === name);
+    if (!wallet) throw new Error(`${name} isn't available`);
+    const current = live.current;
+    const account = current?.kind === "solana" && current.wallet.name === name ? current.account : await solanaConnect(wallet, false);
+    if (!account) throw new Error(`${name} didn't share an account`);
+    const transaction = await build(account.address);
+    const feature = wallet.features["solana:signAndSendTransaction"];
+    if (!method(feature, "signAndSendTransaction")) throw new Error(`${name} can't send Solana transactions`);
+    const output: unknown = await feature.signAndSendTransaction({ account, chain: "solana:mainnet", transaction });
+    const list: unknown[] = Array.isArray(output) ? output : [];
+    const first = list[0];
+    const signature: unknown = typeof first === "object" && first !== null ? Reflect.get(first, "signature") : null;
+    if (!(signature instanceof Uint8Array)) throw new Error(`${name} didn't return a signature`);
+    return baseEncode(signature);
+  }, []);
+
   const value = useMemo<Near>(
     () => ({
       accountId: connection ? ownerOf(connection) : null,
       address: connection ? addressOf(connection) : null,
       kind: connection?.kind ?? null,
       evmWallets,
+      solanaWallets: solanaWallets.map(({ name, icon }) => ({ name, icon })),
+      solanaSend,
       connect,
       disconnect,
       sign,
       send,
     }),
-    [connection, evmWallets, connect, disconnect, sign, send],
+    [connection, evmWallets, solanaWallets, solanaSend, connect, disconnect, sign, send],
   );
 
   const group = (title: string, rows: ReactNode) => (

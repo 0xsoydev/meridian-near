@@ -38,6 +38,7 @@ import {
   statusSchema,
   walletSchema,
 } from "../../../lib/wire";
+import { latestBlockhash, solTransfer, splTransfer, tokenProgram } from "../../../lib/solana";
 import { useNear, type EvmWallet, type NearTransaction, type Signed } from "../providers";
 
 const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
@@ -142,7 +143,7 @@ function Venue() {
 }
 
 export default function WalletPage() {
-  const { accountId, address: own, kind, connect, sign, send, evmWallets: wallets } = useNear();
+  const { accountId, address: own, kind, connect, sign, send, evmWallets: wallets, solanaWallets, solanaSend } = useNear();
   const viaNear = kind === null || kind === "near";
   const [balances, setBalances] = useState<Balances | null>(null);
   const [keys, setKeys] = useState<KeySummary[] | null>(null);
@@ -493,21 +494,66 @@ export default function WalletPage() {
         body: JSON.stringify({ tx_hash: hash, ...(result.data.depositMemo ? { memo: result.data.depositMemo } : {}) }),
       });
     } catch (error) {
-      setQuote(null);
-      setQuoteStatus(null);
-      setSent(false);
-      const failure = walletErrorSchema.safeParse(error);
-      const code = failure.success ? failure.data.code : undefined;
-      const reason = failure.success && failure.data.message ? failure.data.message : "it gave no reason";
-      setMoney({
-        tone: "down",
-        text:
-          code === 4001
-            ? `You cancelled in ${wallet.name}. Nothing was sent.`
-            : code === 4902
-              ? `Add ${chain} to ${wallet.name}, then try again.`
-              : `${wallet.name} stopped: ${reason}. Nothing was sent.`,
+      payFailed(wallet.name, chain, error);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const payFailed = (name: string, chain: string, error: unknown) => {
+    setQuote(null);
+    setQuoteStatus(null);
+    setSent(false);
+    const failure = walletErrorSchema.safeParse(error);
+    const code = failure.success ? failure.data.code : undefined;
+    const reason = failure.success && failure.data.message ? failure.data.message : "it gave no reason";
+    setMoney({
+      tone: "down",
+      text:
+        code === 4001
+          ? `You cancelled in ${name}. Nothing was sent.`
+          : code === 4902
+            ? `Add ${chain} to ${name}, then try again.`
+            : error instanceof Error && !("code" in error)
+              ? `${error.message}. Nothing was sent.`
+              : `${name} stopped: ${reason}. Nothing was sent.`,
+    });
+  };
+
+  const paySolana = async (name: string) => {
+    const token = tokens.find((item) => item.assetId === asset);
+    if (!token || token.blockchain !== "sol") return;
+    const micro = parseUsd(amount);
+    if (micro === null || micro === 0n) return flagMoney("Enter an amount in USDC, like 10.", "amount");
+    startOver();
+    setBusy("pay");
+    setMoney({ tone: "plain", text: `Confirm in ${name}.` });
+    try {
+      let target = "";
+      const signature = await solanaSend(name, async (from) => {
+        setAddress(from);
+        setMoney({ tone: "plain", text: "Getting a deposit address from NEAR Intents." });
+        const result = await api("/api/v1/quotes", intentQuoteSchema, {
+          method: "POST",
+          body: JSON.stringify({ kind: "fund", owner: accountId, originAsset: asset, amount: micro.toString(), refundTo: from }),
+        });
+        if (!result.ok) throw new Error(result.message.replace(/\.$/, ""));
+        if (!result.data.depositAddress) throw new Error("NEAR Intents didn't give a deposit address");
+        target = result.data.depositAddress;
+        setQuote(result.data);
+        setMoney({ tone: "plain", text: `Confirm the payment in ${name}.` });
+        const blockhash = await latestBlockhash();
+        const amountIn = BigInt(result.data.amountIn);
+        return token.contractAddress
+          ? splTransfer(from, target, token.contractAddress, await tokenProgram(token.contractAddress), amountIn, token.decimals, blockhash)
+          : solTransfer(from, target, amountIn, blockhash);
       });
+      setSent(true);
+      setQuoteStatus("PENDING_DEPOSIT");
+      setMoney(null);
+      await api(`/api/v1/quotes/${target}`, anything, { method: "POST", body: JSON.stringify({ tx_hash: signature }) });
+    } catch (error) {
+      payFailed(name, "Solana", error);
     } finally {
       setBusy(null);
     }
@@ -563,6 +609,7 @@ export default function WalletPage() {
   const token = tokens.find((item) => item.assetId === asset) ?? null;
   const chain = token ? chainName(token.blockchain) : "that chain";
   const payable = direction === "deposit" && token !== null && (CHAINS[token.blockchain]?.evm ?? null) !== null && wallets.length > 0;
+  const solPayable = direction === "deposit" && token?.blockchain === "sol" && solanaWallets.length > 0;
   const shown = preview && preview.key === `${asset}:${amount}` ? preview : null;
   const uri = token && quote ? paymentUri(token, quote) : null;
   const chains = [...new Set(tokens.map((item) => item.blockchain))].sort((a, b) => rank(a) - rank(b));
@@ -716,7 +763,15 @@ export default function WalletPage() {
                     </CommitButton>
                   ))
                 : null}
-              {payable ? (
+              {solPayable
+                ? solanaWallets.map((wallet) => (
+                    <CommitButton key={wallet.name} disabled={busy !== null || !MAINNET} aria-busy={busy === "pay"} onClick={() => void paySolana(wallet.name)}>
+                      <img src={wallet.icon} alt="" width={16} height={16} className="size-4" />
+                      Pay with {wallet.name}
+                    </CommitButton>
+                  ))
+                : null}
+              {payable || solPayable ? (
                 <button
                   type="button"
                   disabled={busy !== null || (!MAINNET && direction === "deposit")}
