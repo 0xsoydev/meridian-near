@@ -571,7 +571,7 @@ export default function WalletPage() {
     setBusy(null);
     setAgents(
       result.ok
-        ? { tone: "up", text: `Moving ${usd(BigInt(result.data.returned_usd_micro))} to your wallet. It arrives within a minute.` }
+        ? { tone: "up", text: `Moving ${usd(BigInt(result.data.returned_usd_micro))} to your wallet. It arrives within a few minutes.` }
         : { tone: "down", text: result.message },
     );
     if (result.ok) await listKeys(false);
