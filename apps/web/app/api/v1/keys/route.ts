@@ -15,17 +15,7 @@ export async function POST(request: Request): Promise<Response> {
 
 export async function GET(request: Request): Promise<Response> {
   const params = new URL(request.url).searchParams;
-  const signed = await verifySigned(
-    {
-      account_id: params.get("account_id"),
-      public_key: params.get("public_key"),
-      signature: params.get("signature"),
-      nonce: params.get("nonce"),
-      message: params.get("message"),
-    },
-    expectedHost(request),
-    "list_keys",
-  );
+  const signed = await verifySigned(Object.fromEntries(params), expectedHost(request), "list_keys");
   if (!signed) return fail(401, "invalid_api_key", "a fresh NEAR signature is required");
   const account = await ensureAccount(signed.account);
   const [listed, usage] = await Promise.all([listKeys(account.id), recentUsage(account.id)]);

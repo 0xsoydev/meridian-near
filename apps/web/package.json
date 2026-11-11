@@ -16,6 +16,8 @@
   "dependencies": {
     "@hot-labs/near-connect": "0.12.0",
     "@neondatabase/serverless": "1.2.0",
+    "@noble/curves": "2.2.0",
+    "@noble/hashes": "2.2.0",
     "@tailwindcss/postcss": "4.3.3",
     "clsx": "^2.1.1",
     "drizzle-orm": "0.45.4",
