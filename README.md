@@ -14,15 +14,44 @@ Built for the NEAR Hackathon, tracks `defi` and `agents`.
 - **NEAR Intents 1Click** is the way in from another chain and the way out to one. `dry` quotes let anyone try it without funds.
 - **NEAR AI Cloud** is the verifiable rail. Its TEE models are the demo market, and `/receipts` reads straight from `core`.
 
+## Security model
+
+Money moves only where its owner signed for it. Each key can do exactly this much:
+
+| Key | Held by | Can | Cannot |
+|---|---|---|---|
+| The owner's NEAR key | the owner's wallet | deposit, `withdraw`, set and raise limits (`set_cap`), trade perps (`modify`) | |
+| A router key `rk_` | an agent | run inference, buy and resell MTokens with its float, which refills by `pull` only inside the daily limit its owner set on chain | touch the wallet, raise its own limit, withdraw |
+| A swarm key | one sub-agent | run inference with its share of a swarm's budget until the swarm ends | top up, trade, start a swarm, outlive `expires_at` |
+| The web function-call key (`NEAR_WEB_KEY`) | the router | `pull` inside each owner's daily limit, into the treasury | `withdraw`, `set_cap`, `modify`, `payout` |
+| The keeper function-call key (`NEAR_KEEPER_KEY`) | the keeper | `post` the index (10 % a minute at most), `log_rollups`, `liquidate`, `payout` from the treasury | `withdraw` from a wallet, `set_cap`, `pull` |
+
+`withdraw`, `set_cap` and `modify` require one yoctoNEAR attached (`contracts/core/src/lib.rs`), and a function-call key can't attach a deposit, so only the owner's own wallet can call them. `pull` refuses anything past today's limit.
+
+If both server keys leaked, an attacker could pull what is left of every owner's limit for today into the treasury and pay the treasury out to any account. Owners would lose at most today's unused limits; the treasury, which holds agents' floats, unpaid seller earnings and fees, is what is exposed. No wallet can be emptied and no limit raised without its owner's signature.
+
 ## What works
 
 - The `core` contract: wallets, caps, `pull`, `payout`, perps ported from the earlier Solidity build, the index and rollups. 11 unit tests.
 - The router: OpenAI-compatible streaming, prepaid MTokens, spot and limit orders, resale, a matcher, and a float that refills from the owner's wallet inside the on-chain limit.
 - The keeper: rollups, index posts, liquidations and daily payouts over NEAR.
 - The app: wallet, agent approval, trade, perps, sell and receipts pages on `@hot-labs/near-connect`.
-- 1Click deposits and withdrawals from and to other chains, and NEAR AI response proofs verified on `/receipts`.
+- Deposits and withdrawals in any token on any chain 1Click supports, paying straight from MetaMask or any browser wallet on EVM chains, and NEAR AI response proofs verified on `/receipts`.
+- Swarms: one task on several models at once, each model its own OpenCode sub-agent in its own git worktree with its own key and share of the budget (`apps/web/public/skills/meridian-swarm/`).
+- Moving a key's unspent balance back to the owner's wallet without revoking it.
 
 Not built yet: perp trade history and the subscription OAuth rails (see `docs/plan.md`).
+
+## Try it
+
+Each step runs on testnet with the stack from "Run it".
+
+1. **Give an agent a key.** Run `pnpm --filter demo-agent start`. It prints a link and a QR code. Open it, connect a NEAR testnet wallet and approve a daily limit. The agent gets its key and streams an answer, paid from your wallet inside the limit.
+2. **Watch a runaway agent stop.** Start the stub rail with `STUB_TOKENS=150000`, give a key a $0.50 limit, and run `RUNAWAY=1 RK_KEY=<key> MODEL=glm-5.3 pnpm --filter demo-agent start`. It logs each request's cost, then stops at about request 20 with the approval link and a QR code. Your wallet paid exactly the $0.50 limit.
+3. **Run a swarm.** Install the skill from `/skills/meridian-swarm/` (see `/skill.md`), then in any git repository run `node swarm.ts 3 "fix the failing test" --budget 0.30`. The three cheapest models each work in their own worktree. You see a live table, then one patch per model and a JSON line for your agent. Ctrl-C returns the unspent budget.
+4. **Price a deposit from another chain.** On `/wallet`, choose Deposit, From another chain, and SOL on Solana. The panel shows a live price: "You send 0.12 SOL on Solana. $10.00 USDC lands in your Meridian wallet." On mainnet the same panel pays from MetaMask or any browser wallet.
+5. **Move a key's balance to your wallet.** On `/wallet`, choose Show my agents, then Move to wallet. The wallet balance rises within a minute.
+6. **Recompute the index.** `/receipts` recomputes the index in your browser from the rollups on `core`.
 
 ## Run it
 
@@ -69,6 +98,7 @@ cd contracts/core && cargo test
 ```
 contracts/core/     the Rust contract
 apps/web/           the router, pages and API routes
+apps/web/public/skills/meridian-swarm/   the swarm skill agents install
 keeper/             rollups, index, liquidations, payouts
 agents/demo/        an agent that buys inference from the terminal
 docs/plan.md        the spec
