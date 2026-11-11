@@ -625,7 +625,7 @@ export default function WalletPage() {
         )}
         <p className="text-[14px] leading-[22px] text-muted">
           USDC on {CORE || "core"}, held for{" "}
-          <a href={explorer("address", accountId)} target="_blank" rel="noreferrer" className={`${LINK} text-ink`}>
+          <a href={explorer("address", accountId)} target="_blank" rel="noreferrer" className={`${LINK} break-all text-ink`}>
             {own ?? accountId}
           </a>
           {balances && balances.near > 0n ? (
