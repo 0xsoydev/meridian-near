@@ -175,13 +175,18 @@ export default function WalletPage() {
       if (!result.ok) return;
       const external = result.data.data.filter((token) => token.blockchain !== "near");
       setTokens(external);
-      setAsset(external.find((token) => token.blockchain === "base" && token.symbol === "USDC")?.assetId ?? external[0]?.assetId ?? "");
     });
   }, []);
 
   useEffect(() => {
     if (!viaNear) setRoute("chain");
   }, [viaNear]);
+
+  useEffect(() => {
+    const chain = kind === "solana" ? "sol" : "base";
+    const preferred = tokens.find((token) => token.blockchain === chain && token.symbol === "USDC") ?? tokens[0];
+    if (preferred) setAsset(preferred.assetId);
+  }, [kind, tokens]);
 
   useEffect(() => {
     const token = tokens.find((item) => item.assetId === asset);
