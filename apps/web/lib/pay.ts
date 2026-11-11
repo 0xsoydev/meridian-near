@@ -34,7 +34,7 @@ export type TopUpResult = { floatMicro: bigint } | { blocked: Response };
 const inflight = new Map<string, Promise<TopUpResult>>();
 
 export async function refill(key: KeyRow): Promise<void> {
-  if (key.balanceUsdMicro >= LOW_FLOAT_MICRO) return;
+  if (key.balanceUsdMicro >= LOW_FLOAT_MICRO || !key.capKey) return;
   await topUp(key, PULL_MICRO);
 }
 

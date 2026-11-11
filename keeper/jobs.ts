@@ -1,3 +1,4 @@
+import { returnSwarmFloats } from "../apps/web/lib/accounts.ts";
 import { matchAllBids } from "../apps/web/lib/bids.ts";
 import { asks } from "../apps/web/lib/book.ts";
 import { releaseStale } from "../apps/web/lib/ledger.ts";
@@ -114,6 +115,8 @@ export async function liquidateUnderwater(): Promise<void> {
 export async function sweepStale(): Promise<void> {
   const released = await releaseStale();
   if (released > 0) console.log(`[sweep] released ${released} stale usage rows`);
+  const returned = (await returnSwarmFloats(null)).reduce((sum, row) => sum + row.amount, 0n);
+  if (returned > 0n) console.log(`[swarm] returned ${returned} micro-USDC from ended swarms`);
 }
 
 export async function matchRestingBids(): Promise<void> {

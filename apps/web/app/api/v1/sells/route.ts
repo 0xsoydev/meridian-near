@@ -18,6 +18,7 @@ const intentSchema = z.object({
 export async function POST(request: Request): Promise<Response> {
   const key = await routerKey(request);
   if (!key) return fail(401, "invalid_api_key", "invalid router key");
+  if (key.parentId) return fail(403, "invalid_request", "swarm agents can only run inference");
 
   const parsed = intentSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail(400, "invalid_request", "expected { model, tokens } with tokens as an integer string");

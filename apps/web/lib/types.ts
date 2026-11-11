@@ -107,8 +107,28 @@ export type KeySummary = {
   float_usd_micro: string;
   cap_key: string | null;
   cap: CapSummary | null;
+  parent_id: string | null;
+  expires_at: string | null;
   created_at: string;
 };
+
+export type SwarmAgent = { key: string; key_id: string; model: string; rail: string; ask_micro_per_mtok: string };
+
+export type SwarmStart = { agents: SwarmAgent[]; share_usd_micro: string; expires_at: string };
+
+export type SwarmAgentView = {
+  key_id: string;
+  model: string;
+  spent_usd_micro: string;
+  left_usd_micro: string;
+  requests: number;
+  expires_at: string;
+  ended: boolean;
+};
+
+export type SwarmView = { agents: SwarmAgentView[] };
+
+export type ReturnedFloat = { returned_usd_micro: string };
 
 export type CapSummary = {
   per_day_usd_micro: string;

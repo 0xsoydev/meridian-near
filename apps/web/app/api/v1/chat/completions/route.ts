@@ -141,6 +141,7 @@ export async function POST(request: Request): Promise<Response> {
         micro: hold.micro,
       });
       if (reserved.listingOk && !reserved.keyOk) {
+        if (key.parentId) return fail(402, "insufficient_balance", "this swarm agent has spent its share of the budget");
         const topped = await topUp(key, hold.micro);
         if ("blocked" in topped) return topped.blocked;
         const retry = await reserve({

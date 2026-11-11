@@ -198,6 +198,8 @@ const keySummary: z.ZodType<KeySummary> = z.object({
   float_usd_micro: int,
   cap_key: z.string().nullable(),
   cap: cap.nullable(),
+  parent_id: z.string().nullable(),
+  expires_at: z.string().nullable(),
   created_at: z.string(),
 });
 
