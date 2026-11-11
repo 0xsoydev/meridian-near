@@ -67,14 +67,15 @@ async function main(): Promise<void> {
   }
 
   if (process.env.STUB_RAIL_URL) {
-    await listing({
-      sellerId: account.id,
-      rail: "stub",
-      model: "glm-5.3",
-      price: 180_000n,
-      key: "sk-stub",
-      nonce: "seed-stub-house",
-    });
+    const stubs = [
+      ["glm-5.3", 180_000n, "seed-stub-house"],
+      ["deepseek-v4.1-flash", 140_000n, "seed-stub-deepseek-v4.1-flash"],
+      ["gpt-6-sol", 210_000n, "seed-stub-gpt-6-sol"],
+      ["claude-opus-5.5", 260_000n, "seed-stub-claude-opus-5.5"],
+    ] as const;
+    for (const [model, price, nonce] of stubs) {
+      await listing({ sellerId: account.id, rail: "stub", model, price, key: "sk-stub", nonce });
+    }
   }
 
   const core = coreId();

@@ -5,6 +5,7 @@ const MODEL = process.env.MODEL ?? "glm-5.3-flash";
 const CAP_MICRO = process.env.CAP_MICRO ?? "5000000";
 const BUY_TOKENS = process.env.BUY_TOKENS ?? "1000000";
 const EXISTING_KEY = process.env.RK_KEY;
+const RUNAWAY = process.env.RUNAWAY === "1";
 
 type DeviceStart = {
   device_code: string;
@@ -59,8 +60,50 @@ async function trade(key: string, path: string, tokens: string): Promise<void> {
   console.log(`${path} ${response.status} ${JSON.stringify(body).slice(0, 160)}`);
 }
 
+function fields(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {};
+}
+
+function micro(value: unknown): bigint {
+  return typeof value === "string" && /^\d+$/.test(value) ? BigInt(value) : 0n;
+}
+
+function dollars(amount: bigint): string {
+  return `$${(Number(amount) / 1e6).toFixed(4)}`;
+}
+
+async function runaway(key: string): Promise<void> {
+  const headers = { authorization: `Bearer ${key}`, "content-type": "application/json" };
+  const me = fields(await (await fetch(`${ROUTER}/api/v1/me`, { headers })).json());
+  const limit = micro(fields(me.cap).per_day_usd_micro);
+  let spent = 0n;
+  for (let request = 1; ; request += 1) {
+    const response = await fetch(`${ROUTER}/api/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: "The test still fails. Try again." }], max_tokens: 64 }),
+    });
+    const body = fields(await response.json().catch(() => null));
+    if (!response.ok) {
+      const reason = fields(body.error).message;
+      console.log(`Stopped at request ${request}: ${typeof reason === "string" ? reason : `the router answered ${response.status}`}`);
+      const qr = fields(body.action).qr;
+      if (typeof qr === "string") console.log(qr);
+      return;
+    }
+    const usage = fields(await (await fetch(`${ROUTER}/api/v1/usage`, { headers })).json()).data;
+    const cost = micro(fields(Array.isArray(usage) ? usage[0] : null).charge_usd_micro);
+    spent += cost;
+    console.log(`Request ${request} cost ${dollars(cost)}. Spent ${dollars(spent)} of today's ${dollars(limit)} limit.`);
+  }
+}
+
 async function main(): Promise<void> {
   const key = EXISTING_KEY ?? (await device());
+  if (RUNAWAY) {
+    await runaway(key);
+    return;
+  }
   await me(key, "before ");
 
   const client = new OpenAI({ baseURL: `${ROUTER}/api/v1`, apiKey: key });

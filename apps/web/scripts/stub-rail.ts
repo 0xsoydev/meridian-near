@@ -1,4 +1,5 @@
 import { createServer, type ServerResponse } from "node:http";
+import { z } from "zod";
 
 const port = Number(process.env.STUB_PORT ?? "4010");
 const pricing = { prompt: "0.0000014", completion: "0.0000044" };
@@ -12,22 +13,51 @@ const models = [
   "anthropic/claude-opus-5.5",
   "openai/gpt-6-sol",
 ];
-const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+const reported = Number(process.env.STUB_TOKENS ?? "0");
+const usage =
+  reported > 0
+    ? { prompt_tokens: reported, completion_tokens: reported, total_tokens: reported * 2 }
+    : { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+
+const requestSchema = z.object({
+  tools: z.array(z.object({ function: z.object({ name: z.string() }) })).optional(),
+  messages: z.array(z.object({ role: z.string() })).optional(),
+});
+
+function shellCommand(raw: string): string | null {
+  const command = process.env.STUB_SHELL;
+  const parsed = requestSchema.safeParse(raw ? JSON.parse(raw) : null);
+  if (!command || !parsed.success) return null;
+  const offered = parsed.data.tools?.some((tool) => tool.function.name === "shell") ?? false;
+  return offered && !parsed.data.messages?.some((message) => message.role === "tool") ? command : null;
+}
 
 function wantsStream(raw: string): boolean {
   const parsed: unknown = raw ? JSON.parse(raw) : null;
   return typeof parsed === "object" && parsed !== null && "stream" in parsed && parsed.stream === true;
 }
 
-async function stream(response: ServerResponse, id: string, slow: boolean): Promise<void> {
+async function stream(response: ServerResponse, id: string, slow: boolean, command: string | null): Promise<void> {
   response.writeHead(200, { "content-type": "text/event-stream" });
-  const words = slow ? ["one ", "two ", "three ", "four ", "five ", "six "] : ["po", "ng"];
-  for (const word of words) {
+  const chunk = (choices: unknown[]) => response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", choices })}\n\n`);
+  if (command) {
+    chunk([
+      {
+        index: 0,
+        delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_stub", type: "function", function: { name: "shell", arguments: JSON.stringify({ command }) } }] },
+      },
+    ]);
+    chunk([{ index: 0, delta: {}, finish_reason: "tool_calls" }]);
+  } else {
+    const words = slow ? ["one ", "two ", "three ", "four ", "five ", "six "] : ["po", "ng"];
+    for (const word of words) {
+      if (response.destroyed) return;
+      chunk([{ index: 0, delta: { content: word } }]);
+      if (slow) await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
     if (response.destroyed) return;
-    response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", choices: [{ index: 0, delta: { content: word } }] })}\n\n`);
-    if (slow) await new Promise((resolve) => setTimeout(resolve, 1000));
+    chunk([{ index: 0, delta: {}, finish_reason: "stop" }]);
   }
-  if (response.destroyed) return;
   response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", choices: [], usage })}\n\n`);
   response.end("data: [DONE]\n\n");
 }
@@ -68,7 +98,7 @@ const server = createServer((request, response) => {
           ? `seen:${String(fields.model)}:mt=${String(fields.max_tokens ?? "-")}:mct=${String(fields.max_completion_tokens ?? "-")}`
           : `chatcmpl-stub-${Date.now()}`;
       if (wantsStream(raw)) {
-        void stream(response, id, request.headers.authorization === "Bearer sk-slow");
+        void stream(response, id, request.headers.authorization === "Bearer sk-slow", shellCommand(raw));
         return;
       }
       response.writeHead(200, { "content-type": "application/json" });
