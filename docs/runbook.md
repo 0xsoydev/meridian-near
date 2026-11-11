@@ -68,7 +68,13 @@ It creates the house listing on `NEARAI_API_KEY` and prints the owner commands: 
 node --experimental-strip-types --env-file=apps/web/.env keeper/main.ts
 ```
 
-It publishes rollups every minute, posts the index every three, liquidates every thirty seconds, pays seller earnings once a day after 00:00 UTC and pending refunds (revoked keys, Move to wallet) within a minute, and moves what ended swarms didn't spend back to their parent keys every minute.
+It publishes rollups every minute, posts the index every three, liquidates every thirty seconds, pays seller earnings once a day after 00:00 UTC and pending refunds (revoked keys, Move to wallet) on every run, and moves what ended swarms didn't spend back to their parent keys every minute.
+
+## Deploy
+
+1. Vercel: import the repository and set the root directory to `apps/web`. `apps/web/vercel.json` runs `pnpm db:migrate && pnpm build`, so the schema follows each deploy. Add Neon from the Storage tab; it sets `DATABASE_URL`.
+2. Environment: every name in `.env.example`, mainnet values for Production and testnet values for Preview, plus `CRON_SECRET`. `PUBLIC_HOST` is the deployment's own URL, because signed messages are checked against it.
+3. The keeper: `GET /api/v1/tick` with `Authorization: Bearer $CRON_SECRET` runs every keeper job once. `.github/workflows/tick.yml` calls it every 5 minutes; set the repository secret `CRON_SECRET` and the variable `MERIDIAN_URL`. On Vercel Pro a per-minute Vercel Cron on the same path also works, and `keeper/main.ts` still runs on any always-on host.
 
 ## Rehearsal
 
@@ -82,7 +88,7 @@ It publishes rollups every minute, posts the index every three, liquidates every
 8. `/receipts` shows a rollup; with a NEAR AI key it also shows a verified proof.
 9. A swarm: in any git repository, `MERIDIAN_URL=<host> node apps/web/public/skills/meridian-swarm/swarm.ts 3 "<task>" --budget 0.06`. Locally, start the stub rail with `STUB_SHELL='echo hello >> README.md'` so the sub-agents make a change.
 10. A runaway agent: a key with a $0.50 limit, the stub rail with `STUB_TOKENS=150000`, then `RUNAWAY=1 RK_KEY=<key> MODEL=glm-5.3 pnpm --filter demo-agent start`. It stops at the 403 after about 19 requests.
-11. Move to wallet on `/wallet`: the key's float leaves it and the wallet balance rises within a minute.
+11. Move to wallet on `/wallet`: the key's float leaves it and the wallet balance rises on the next keeper run.
 12. Deposit from another chain on `/wallet`: on testnet a token on Solana shows a real mainnet price; paying needs mainnet.
 13. `RK_KEY=<key> pnpm --filter web exec node --experimental-strip-types scripts/e2e.ts` checks the swarm money path: spent plus returned equals the budget.
 14. Connect MetaMask or Phantom from the picker, approve an agent with one signature, and on mainnet pay a deposit with the same wallet. `GET /api/v1/signed?owner=<id>` shows the owner's next nonce.
