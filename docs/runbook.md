@@ -35,8 +35,8 @@ pnpm --filter web db:migrate
 ```sh
 cd contracts/core
 cargo test
-cargo near build non-reproducible-wasm
-near contract deploy core.<team>.testnet use-file target/near/meridian_core/meridian_core.wasm \
+cargo near build non-reproducible-wasm --no-abi
+near contract deploy core.<team>.testnet use-file target/near/meridian_core.wasm \
   with-init-call new \
   json-args '{"owner":"<team>.testnet","ops":"ops.<team>.testnet","usdc":"<usdc>"}' \
   prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
