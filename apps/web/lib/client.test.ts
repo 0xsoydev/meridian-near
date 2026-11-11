@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ago, evmTransfer, fundingPercent, paymentUri, percent, sentence, usd } from "./client.ts";
+import { ago, evmTransfer, fundingPercent, nearAmount, paymentUri, percent, sentence, shortAccount, usd } from "./client.ts";
 
 test("sentence turns router errors into sentences", () => {
   assert.equal(sentence("credential rejected by the rail"), "Credential rejected by the rail.");
@@ -62,4 +62,14 @@ test("paymentUri follows EIP-681, Solana Pay and BIP-21, and stays empty when a 
   assert.equal(paymentUri({ ...usdcBase, blockchain: "stellar" }, { ...quote, depositMemo: "123" }), null);
   assert.equal(paymentUri({ ...usdcBase, blockchain: "ton" }, quote), null);
   assert.equal(paymentUri(usdcBase, { ...quote, depositAddress: null }), null);
+});
+
+test("shortAccount shortens 0x accounts only, and nearAmount shows NEAR to four decimals", () => {
+  assert.equal(shortAccount("0x67865d039732e56b9ad1c30972170cdc3e446ec8"), "0x6786…6ec8");
+  assert.equal(shortAccount("meridian-e2e.testnet"), "meridian-e2e.testnet");
+  assert.equal(shortAccount("0x67865D039732e56b9ad1c30972170cdc3e446ec8"), "0x67865D039732e56b9ad1c30972170cdc3e446ec8");
+  assert.equal(nearAmount(0n), "0");
+  assert.equal(nearAmount(5_500_000_000_000_000_000_000n), "0.0055");
+  assert.equal(nearAmount(10n ** 24n), "1");
+  assert.equal(nearAmount(1_234_567_890_000_000_000_000_000n), "1.2345");
 });

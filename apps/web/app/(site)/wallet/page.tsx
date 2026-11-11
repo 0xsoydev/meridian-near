@@ -38,7 +38,7 @@ import {
   statusSchema,
   walletSchema,
 } from "../../../lib/wire";
-import { useNear, type NearTransaction, type Signed } from "../providers";
+import { useNear, type EvmWallet, type NearTransaction, type Signed } from "../providers";
 
 const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
 const USDC = process.env.NEXT_PUBLIC_NEAR_USDC_ID ?? "";
@@ -55,17 +55,10 @@ type Balances = { wallet: bigint; near: bigint };
 const LIVE: ReadonlyArray<IntentStatus> = ["PENDING_DEPOSIT", "PROCESSING"];
 const ORDER = Object.keys(CHAINS);
 
-type Eip1193 = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
-type EvmWallet = { uuid: string; name: string; icon: string; provider: Eip1193 };
 type Preview = { key: string } & ({ quote: IntentQuote } | { error: string });
 
-const announcedSchema = z.object({ info: z.object({ uuid: z.string(), name: z.string(), icon: z.string() }), provider: z.unknown() });
 const accountsSchema = z.tuple([z.string()]).rest(z.string());
 const walletErrorSchema = z.object({ code: z.number().optional(), message: z.string().optional() });
-
-function isEip1193(value: unknown): value is Eip1193 {
-  return typeof value === "object" && value !== null && "request" in value && typeof value.request === "function";
-}
 
 function rank(code: string): number {
   const at = ORDER.indexOf(code);
@@ -149,7 +142,7 @@ function Venue() {
 }
 
 export default function WalletPage() {
-  const { accountId, connect, sign, send } = useNear();
+  const { accountId, connect, sign, send, evmWallets: wallets } = useNear();
   const [balances, setBalances] = useState<Balances | null>(null);
   const [keys, setKeys] = useState<KeySummary[] | null>(null);
   const [usage, setUsage] = useState<OwnerUsage[]>([]);
@@ -168,7 +161,6 @@ export default function WalletPage() {
   const [agents, setAgents] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [asked, setAsked] = useState<string | null>(null);
-  const [wallets, setWallets] = useState<EvmWallet[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [sent, setSent] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
@@ -184,15 +176,6 @@ export default function WalletPage() {
       setTokens(external);
       setAsset(external.find((token) => token.blockchain === "base" && token.symbol === "USDC")?.assetId ?? external[0]?.assetId ?? "");
     });
-    const announce = (event: Event) => {
-      const found = announcedSchema.safeParse("detail" in event ? event.detail : null);
-      if (!found.success || !isEip1193(found.data.provider)) return;
-      const wallet = { ...found.data.info, provider: found.data.provider };
-      setWallets((all) => (all.some((item) => item.uuid === wallet.uuid) ? all : [...all, wallet]));
-    };
-    window.addEventListener("eip6963:announceProvider", announce);
-    window.dispatchEvent(new Event("eip6963:requestProvider"));
-    return () => window.removeEventListener("eip6963:announceProvider", announce);
   }, []);
 
   const readWallet = useCallback(async (): Promise<Balances | null> => {
@@ -289,10 +272,14 @@ export default function WalletPage() {
 
   const transact = async (label: string, transactions: NearTransaction[], done: string, notify: (notice: Notice) => void) => {
     setBusy(label);
-    const hashes = await send(transactions);
+    const sent = await send(transactions);
     setBusy(null);
-    notify(hashes ? { tone: "up", text: done, tx: hashes.at(-1) } : { tone: "down", text: "The wallet didn't sign, or the transaction failed. Nothing moved." });
-    return hashes;
+    notify(
+      "hashes" in sent
+        ? { tone: "up", text: done, tx: sent.hashes.at(-1) }
+        : { tone: "down", text: sent.failure ?? "The wallet didn't sign, or the transaction failed. Nothing moved." },
+    );
+    return "hashes" in sent ? sent.hashes : null;
   };
 
   const flagMoney = (text: string, field: "amount" | "address") => {

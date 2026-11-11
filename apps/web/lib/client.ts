@@ -3,6 +3,18 @@ import type { BlockedAction, IntentQuote, IntentToken, RailId } from "./types";
 
 export const KEY_STORAGE = "meridian_key";
 
+export const ETH_ACCOUNT = /^0x[0-9a-f]{40}$/;
+
+export function shortAccount(id: string): string {
+  return ETH_ACCOUNT.test(id) ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
+}
+
+export function nearAmount(yocto: bigint): string {
+  const units = yocto / 10n ** 20n;
+  const fraction = (units % 10_000n).toString().padStart(4, "0").replace(/0+$/, "");
+  return `${units / 10_000n}${fraction ? `.${fraction}` : ""}`;
+}
+
 export const RAIL_NAMES: Record<RailId, string> = {
   "near-ai": "NEAR AI",
   openrouter: "OpenRouter",

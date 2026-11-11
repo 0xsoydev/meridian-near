@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { CopyButton } from "../../../components/copy-button";
 import { CommitButton, FOCUS, Field, INPUT, LINK, Line, Skeleton } from "../../../components/kit";
-import { api, explorer, usd } from "../../../lib/client";
+import { ETH_ACCOUNT, api, explorer, nearAmount, usd } from "../../../lib/client";
 import { formatMicroPerMtok, parseUsd } from "../../../lib/price";
 import type { ApprovalView, WalletView } from "../../../lib/types";
 import { anything, approvalSchema, walletSchema } from "../../../lib/wire";
-import { useNear, type NearTransaction } from "../../(site)/providers";
+import { nearFee, useNear, type NearTransaction } from "../../(site)/providers";
 
 const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
 const USDC = process.env.NEXT_PUBLIC_NEAR_USDC_ID ?? "";
@@ -17,6 +18,13 @@ const NETWORK = process.env.NEXT_PUBLIC_NEAR_NETWORK === "mainnet" ? "NEAR mainn
 type Problem = { field: "limit" | "fund" | "send"; text: string };
 
 const plain = (micro: bigint) => formatMicroPerMtok(micro).replaceAll(",", "");
+
+const capCall = (key: string, perDay: bigint): NearTransaction => ({
+  receiverId: CORE,
+  actions: [{ type: "FunctionCall", params: { methodName: "set_cap", args: { key, per_day: perDay.toString() }, gas: "30000000000000", deposit: "1" } }],
+});
+
+const APPROVE_FEE = nearFee([capCall("", 0n)]);
 
 export default function ApprovePage() {
   const { code } = useParams<{ code: string }>();
@@ -53,6 +61,8 @@ export default function ApprovePage() {
   const perDay = parseUsd(limit);
   const amount = fund.trim() === "" ? 0n : parseUsd(fund);
   const held = wallet ? BigInt(wallet.near_usdc_micro) : null;
+  const ethereum = accountId !== null && ETH_ACCOUNT.test(accountId);
+  const gas = wallet ? BigInt(wallet.near_yocto) : null;
   const asked = approval?.cap_usd_micro ? BigInt(approval.cap_usd_micro) : null;
 
   const flag = (field: Problem["field"], text: string) => {
@@ -90,19 +100,11 @@ export default function ApprovePage() {
         ],
       });
     }
-    transactions.push({
-      receiverId: CORE,
-      actions: [
-        {
-          type: "FunctionCall",
-          params: { methodName: "set_cap", args: { key: approval.key_id, per_day: perDay.toString() }, gas: "30000000000000", deposit: "1" },
-        },
-      ],
-    });
-    const hashes = await send(transactions);
-    if (!hashes) {
+    transactions.push(capCall(approval.key_id, perDay));
+    const sent = await send(transactions);
+    if ("failure" in sent) {
       setBusy(null);
-      flag("send", "The wallet didn't sign, or the transaction failed, so nothing changed.");
+      flag("send", sent.failure ?? "The wallet didn't sign, or the transaction failed, so nothing changed.");
       return;
     }
     const confirmed = await api(`/api/v1/approvals/${code}/confirm`, anything, {
@@ -114,7 +116,7 @@ export default function ApprovePage() {
       flag("send", "The limit isn't visible on chain yet. Wait a few seconds, then approve again.");
       return;
     }
-    setDone({ kind: "approved", tx: hashes.at(-1) ?? null });
+    setDone({ kind: "approved", tx: sent.hashes.at(-1) ?? null });
   };
 
   const deny = async () => {
@@ -177,6 +179,7 @@ export default function ApprovePage() {
           <dl className="flex flex-col gap-2 border-y border-line py-4">
             <Line label="Your Meridian wallet">{accountId ? (wallet === null ? "Reading" : usd(BigInt(wallet.wallet_usd_micro))) : "Not connected"}</Line>
             {accountId ? <Line label="USDC in your NEAR account">{held === null ? "Reading" : usd(held)}</Line> : null}
+            {ethereum ? <Line label="NEAR for network fees">{gas === null ? "Reading" : `${nearAmount(gas)} NEAR`}</Line> : null}
             <Line label="Network">{NETWORK}</Line>
           </dl>
 
@@ -214,6 +217,16 @@ export default function ApprovePage() {
           </div>
 
           <div className="flex flex-col gap-4">
+            {ethereum && gas !== null && gas < APPROVE_FEE ? (
+              <div className="flex flex-col items-start gap-2 border-l-2 border-accent pl-3">
+                <p className="text-pretty text-[13px] leading-[20px] text-ink">
+                  Approving uses about {nearAmount(APPROVE_FEE)} NEAR in network fees, paid from your NEAR account. It has {nearAmount(gas)} NEAR, so send it a
+                  little NEAR first, such as 0.05.
+                </p>
+                <code className="break-all font-mono text-[12px] leading-[18px] text-muted">{accountId}</code>
+                <CopyButton value={accountId} label="Copy address" />
+              </div>
+            ) : null}
             <CommitButton disabled={busy !== null} aria-busy={busy === "approve"} onClick={() => void approve()} className="w-full">
               {busy === "approve"
                 ? "Waiting for the wallet"
@@ -237,7 +250,8 @@ export default function ApprovePage() {
           </div>
 
           <p className="text-[12px] leading-[18px] text-muted">
-            One wallet prompt signs both steps: the deposit, if any, and the daily limit on {CORE || "core"}.
+            {ethereum ? "Your wallet asks you to confirm each step" : "One wallet prompt signs both steps"}: the deposit, if any, and the daily limit on{" "}
+            {CORE || "core"}.
           </p>
         </section>
       )}

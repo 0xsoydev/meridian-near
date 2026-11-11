@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { useNear } from "../app/(site)/providers";
+import { shortAccount } from "../lib/client";
 import { FOCUS, ICON, SECONDARY } from "./kit";
 import { NAV_LINKS } from "./nav-links";
 
@@ -63,7 +64,9 @@ export function TradeNav() {
           {accountId ? (
             <details className="group relative">
               <summary className={`${SECONDARY} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
-                <span className="max-w-[132px] truncate lg:max-w-[180px]">{accountId}</span>
+                <span title={accountId} className="max-w-[132px] truncate lg:max-w-[180px]">
+                  {shortAccount(accountId)}
+                </span>
                 <ChevronDown aria-hidden className="size-4 transition-transform duration-200 ease-brand group-open:rotate-180" />
               </summary>
               <div className="absolute right-0 top-full z-50 mt-2 w-48 border border-line bg-white py-1">

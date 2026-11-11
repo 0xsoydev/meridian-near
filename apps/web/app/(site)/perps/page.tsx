@@ -225,7 +225,7 @@ export default function PerpsPage() {
     }
     setBusy(true);
     setNotice(null);
-    const hashes = await send(
+    const sent = await send(
       plan.map((leg) => ({
         receiverId: CORE,
         actions: [
@@ -241,18 +241,18 @@ export default function PerpsPage() {
         ],
       })),
     );
-    if (hashes && hashes.length > 0) {
+    if ("hashes" in sent && sent.hashes.length > 0) {
       const recorded = await api("/api/v1/perps/history", perpHistorySchema, {
         method: "POST",
-        body: JSON.stringify({ account: accountId, tx_hashes: hashes.slice(0, 4) }),
+        body: JSON.stringify({ account: accountId, tx_hashes: sent.hashes.slice(0, 4) }),
       });
       if (recorded.ok) setHistory(recorded.data.data);
     }
     setBusy(false);
     setNotice(
-      hashes
-        ? { tone: "up", text: done, tx: hashes.at(-1) ?? null }
-        : { tone: "down", text: "The wallet didn't sign the order, or it failed on chain. Nothing changed.", tx: null },
+      "hashes" in sent
+        ? { tone: "up", text: done, tx: sent.hashes.at(-1) ?? null }
+        : { tone: "down", text: sent.failure ?? "The wallet didn't sign the order, or it failed on chain. Nothing changed.", tx: null },
     );
     await readAccount();
     readMarket();
