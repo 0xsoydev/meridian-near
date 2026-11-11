@@ -170,7 +170,7 @@ export function Field({
         <span className="text-[13px] text-muted">{label}</span>
         {children}
       </label>
-      {note ? <p className={`text-[12px] leading-[18px] ${alert ? "text-down" : "text-muted"}`}>{note}</p> : null}
+      {note ? <p className={`text-pretty text-[12px] leading-[18px] ${alert ? "text-down" : "text-muted"}`}>{note}</p> : null}
     </div>
   );
 }
@@ -333,7 +333,7 @@ export function Table({
   children: ReactNode;
 }) {
   return (
-    <div className="overflow-x-auto">
+    <div tabIndex={0} className={`overflow-x-auto ${FOCUS}`}>
       <table className="w-full border-collapse" style={{ minWidth }}>
         <thead>
           <tr>
