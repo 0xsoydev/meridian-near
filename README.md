@@ -44,8 +44,9 @@ If both server keys leaked, an attacker could pull what is left of every owner's
 - Sign-in with MetaMask, Phantom, OKX or any Ethereum or Solana browser wallet, or a NEAR wallet, from one picker. Wallet owners never need NEAR or gas.
 - Swarms: one task on several models at once, each model its own OpenCode sub-agent in its own git worktree with its own key and share of the budget (`apps/web/public/skills/meridian-swarm/`).
 - Moving a key's unspent balance back to the owner's wallet without revoking it.
+- Selling from a Claude Code or Codex subscription: PKCE connect, sealed grant, server-side refresh, and a delist that erases it once prepaid clears.
 
-Not built yet: perp trade history and the subscription OAuth rails (see `docs/plan.md`).
+Not built yet: perp trade history (see `docs/plan.md`).
 
 ## Try it
 

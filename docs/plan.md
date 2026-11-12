@@ -5,9 +5,9 @@ The spec for the NEAR rebuild. `AGENTS.md` makes it binding: change this file fi
 - Development ends 2026-11-14 23:59 UTC. Judging runs 16–18 Nov. The hosted demo stays up until 2026-11-25.
 - Tracks: `defi` and `agents`, plus `privacy` if the NEAR AI proofs ship (§9.12).
 - Baseline: the ETHGlobal Mumbai build on Hedera, 0G and World ID, imported without history at the tag `pre-hackathon`. Only work after that tag is judged (HACKATHON.md Q-002 to Q-004). Its spec is `git show pre-hackathon:docs/plan.md`, cited below as "baseline §n".
-- Removed: Hedera (x402, HCS, mirror node, scheduled payouts), 0G (rail, Galileo, Solidity), World ID, Privy, wagmi, viem, the comfy.fun hookup, and the subscription OAuth rails.
+- Removed: Hedera (x402, HCS, mirror node, scheduled payouts), 0G (rail, Galileo, Solidity), World ID, Privy, wagmi, viem, and the comfy.fun hookup.
 
-Not built: `claude-code` and `codex`. Storing a seller's subscription OAuth token and routing buyers' requests through it is prohibited by both vendors (Anthropic legal page, OpenAI SIWC terms), and making it work requires impersonating their first-party clients. Claude and GPT models are sold through the API-key rails instead.
+Built: `claude-code` and `codex` (§9.15). Each seller connects their own subscription through a fresh PKCE login; the grant is sealed at rest and refreshed server-side. Reverses the earlier removal; review both vendors' terms before enabling these rails in production.
 
 ---
 
@@ -24,7 +24,8 @@ Not built: `claude-code` and `codex`. Storing a seller's subscription OAuth toke
 | Rule | Source |
 |---|---|
 | Everything runs on NEAR: mainnet for the demo, testnet for rehearsal (`NEAR_NETWORK`) | user |
-| No Hedera, 0G, World ID, x402, Privy, EVM code, or subscription OAuth rails | user |
+| No Hedera, 0G, World ID, x402, Privy, or EVM code | user |
+| Sellers may list Claude Code and Codex accounts; the grant never leaves the server | user |
 | Agents never hold a NEAR key, and no screen asks anyone for a private key | user |
 | An agent never stops for money before its owner's daily limit | user |
 | An ask is at or below the blended list price of its own rail, and every listing has a price | plan |
@@ -47,6 +48,7 @@ Static config, one entry per provider. The `0g` rail and `resetPeriod` go. No re
 | `openrouter` | `OPENROUTER_BASE_URL` | `GET /key` | top 30 by weekly tokens, needs `OPENROUTER_API_KEY` |
 | `commandcode` | `COMMANDCODE_BASE_URL` | one 1-token request | live list |
 | `zen`, `opencode-go`, `anthropic`, `openai` | `*_BASE_URL` | `/models` | static lists, OpenRouter prices |
+| `claude-code`, `codex` | `CLAUDE_CODE_BASE_URL`, `CODEX_BASE_URL` | connected account (§9.15) | static lists, OpenRouter prices |
 | `stub` | `STUB_RAIL_URL` | `/models` | tests only |
 
 `near-ai` requests carry `x-no-aliasing: true` and `Accept-Encoding: identity`, and their proofs are kept (§9.12). `Verifiability` becomes `"tee"` or `null`.
@@ -166,6 +168,7 @@ Baseline §6, plus:
 | Method | Path | Auth | What |
 |---|---|---|---|
 | POST | `/api/v1/chat/completions` | `Bearer rk_` | as before, with the float refilled by `pull` (§9.4); headers `X-Router-Model`, `X-Meridian-Paid-From` (`prepaid` or `float`), `X-Meridian-Float` |
+| GET | `/api/v1/oauth/start?rail=` | none | sets the sealed ten-minute state cookie and redirects to the provider's authorize page (§9.15) |
 | POST | `/api/v1/device` | none | `{name, cap_usd_micro?}` → `{device_code, user_code, verification_uri_complete, qr, expires_at, interval}`; `{demo:true}` with `DEMO_KEYS=1` → `{key, key_id}` on the shared demo limit |
 | GET | `/api/v1/device/{device_code}` | the device code | `{status}`; `approved` carries `{key, key_id}` once |
 | POST | `/api/v1/approvals/{user_code}/confirm` | none: the on-chain limit is the proof | `{account_id}` → approved when `cap(account_id, key).left > 0`; for `raise_cap` the account must own the key |
@@ -261,7 +264,7 @@ export function reconcile(): Promise<number>;
 
 ### 9.5 Sellers (`/sell`)
 
-- Wallet → provider (any rail, `near-ai` included; its proofs use the seller's key) → API key → free key check → model → price at or under list → capacity → one NEP-413 signature → `POST /api/listings`.
+- Wallet → provider (any rail, `near-ai` included; its proofs use the seller's key) → API key, or a connected Claude Code/Codex account (§9.15) → free check → model → price at or under list → capacity → one NEP-413 signature → `POST /api/listings`.
 - Stored-key reuse, amend and cancel work as in baseline §10.2, now NEP-413 signed.
 - Earnings show today, unpaid and paid, with NearBlocks links. Withdraw goes to `/wallet`; "Short the index" goes to `/perps?model=…&side=short`.
 
@@ -350,6 +353,18 @@ An agent runs one task on several models at once, each model as its own sub-agen
 
 A child key answers 401 after `expires_at`, never tops up, and can only run inference: `/trades` and `/sells` answer 403, so no MTokens or orders are left on a key that ends.
 
+### 9.15 Connected accounts (`lib/oauth.ts`)
+
+Claude Code and Codex list from the seller's subscription instead of an API key. The venue opens its own grant, so refreshing it never rotates the token the seller's own `claude` or `codex` CLI holds.
+
+1. `GET /api/v1/oauth/start?rail=` sets a sealed, `HttpOnly`, ten-minute cookie carrying the rail, state and PKCE verifier, then redirects to the provider's authorize page. No state row is written; a replay arrives without the cookie and is refused.
+2. The seller authorizes and pastes what the provider shows: `code#state` for Claude, the full `localhost:1455` callback link for Codex.
+3. `POST /api/listings` with `{kind:"oauth", code}` checks the state against the cookie, exchanges the code, probes the account with one tiny request, and seals `{access, refresh, expires_at, account, account_id, plan}` as JSON in `credential_ciphertext`. `credential_kind` is `oauth`; `credential_meta` carries the account and plan for the seller's table. A grant belongs to one listing; only API keys can be reused.
+4. The router refreshes 60 s before `expires_at` and once on a 401, writing the rotated refresh token before the new access token is used. If a concurrent request won the rotation, the loser re-reads the row and uses the winner. A provider refusal marks the listing `invalid`; a 5xx, 429 or timeout from the token endpoint leaves it active and fails only that request.
+5. `DELETE /api/listings/:id` keeps API keys sealed so prepaid MTokens keep serving, and erases an OAuth grant once the listing has no prepaid MTokens left. The seller sees the account and plan on each listing.
+
+Claude requests go to `/v1/messages` with `anthropic-beta: oauth-2025-04-20` and the Claude Code system preamble, and its answers and SSE are translated to OpenAI shapes. Codex requests use the Responses backend and its SSE is translated, tools included.
+
 ## 10. Keeper (`keeper/main.ts`, `jobs.ts`)
 
 One Node process. Each loop catches its own errors and never overlaps itself.
@@ -421,12 +436,15 @@ UX rules:
 | `DEMO_KEYS` | web | `1` turns on demo keys |
 | `DATABASE_URL`, `SECRETS_KEY`, `PUBLIC_HOST`, `TAKE_BPS`, `INDEX_WINDOW_MIN` | as baseline | |
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `COMMANDCODE_BASE_URL`, `ZEN_BASE_URL`, `OPENCODE_GO_BASE_URL`, `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `STUB_RAIL_URL` | web | as baseline |
+| `CLAUDE_CODE_BASE_URL`, `CODEX_BASE_URL` | web | optional overrides for the connected-account rails |
 
 Removed: every `HEDERA_*`, `HCS_TOPIC_ID`, `X402_FACILITATOR_URLS`, `MIRROR_NODE_URL`, every `WORLD_*`, `NEXT_PUBLIC_PRIVY_APP_ID`, `NEXT_PUBLIC_GALILEO_RPC`, `NEXT_PUBLIC_PERP_MARKET`, `NEXT_PUBLIC_INDEX_ORACLE`, `NEXT_PUBLIC_MOCK_USDC`, `KEEPER_PRIVATE_KEY`, `PERP_DEPLOY_BLOCK`, `OG_ROUTER_URL`, `OG_MODELS_URL`.
 
 ## 14. Security
 
-- Seller API keys are sealed with AES-256-GCM. Router keys are stored as SHA-256 and shown once. Device codes are stored as SHA-256, and a new key is delivered once, then deleted.
+- Seller API keys and OAuth grants are sealed with AES-256-GCM. Router keys are stored as SHA-256 and shown once. Device codes are stored as SHA-256, and a new key is delivered once, then deleted.
+- OAuth state and the PKCE verifier live only in a sealed, `HttpOnly` ten-minute cookie. The grant is never sent to the seller's browser: the authorize URL alone crosses the boundary, and the callback code is exchanged server-side.
+- The public listing view masks the connected account (`s***@example.com`); the full address stays server-side.
 - USDC leaves a user's wallet only through that user's 1-yocto `withdraw` or `modify`, or a `pull` inside the limit they set.
 - `ft_on_transfer` accepts only `NEAR_USDC_ID`. `withdraw` debits first and restores on failure. Payout ids pay once.
 - The `ops` keys are function-call keys:

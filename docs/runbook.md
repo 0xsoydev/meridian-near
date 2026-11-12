@@ -92,10 +92,11 @@ It publishes rollups every minute, posts the index every three, liquidates every
 12. Deposit from another chain on `/wallet`: on testnet a token on Solana shows a real mainnet price; paying needs mainnet.
 13. `RK_KEY=<key> pnpm --filter web exec node --experimental-strip-types scripts/e2e.ts` checks the swarm money path: spent plus returned equals the budget.
 14. Connect MetaMask or Phantom from the picker, approve an agent with one signature, and on mainnet pay a deposit with the same wallet. `GET /api/v1/signed?owner=<id>` shows the owner's next nonce.
+15. Optional, with a real subscription: pick Claude Code or Codex on `/sell`, connect, paste the code, and list one model. A second request must refresh without a new login; delist erases the grant and refuses while prepaid MTokens remain.
 
 ## Recovery
 
 - A payout stays `pending` when `core.payout` fails; the keeper retries every minute.
 - A device code expires after 10 minutes; call `/device` again.
-- A listing whose key is refused goes `invalid`; re-list on `/sell`.
+- A listing whose key or connected account is refused goes `invalid`; re-list on `/sell`.
 - A pull that succeeded but was not credited costs one pull; run the request again.
