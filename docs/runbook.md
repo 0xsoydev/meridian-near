@@ -68,13 +68,13 @@ It creates the house listing on `NEARAI_API_KEY` and prints the owner commands: 
 node --experimental-strip-types --env-file=apps/web/.env keeper/main.ts
 ```
 
-It publishes rollups every minute, posts the index every three, liquidates every thirty seconds, pays seller earnings once a day after 00:00 UTC and pending refunds (revoked keys, Move to wallet) on every run, and moves what ended swarms didn't spend back to their parent keys every minute.
+It publishes rollups every minute, posts the index every three, liquidates every thirty seconds, pays seller earnings once a day after 00:00 UTC and pending refunds (revoked keys, Move to wallet) within a minute, and moves what ended swarms didn't spend back to their parent keys every minute.
 
 ## Deploy
 
 1. Vercel: import the repository and set the root directory to `apps/web`. `apps/web/vercel.json` runs `pnpm db:migrate && pnpm build`, so the schema follows each deploy. Add Neon from the Storage tab; it sets `DATABASE_URL`.
-2. Environment: every name in `.env.example`, mainnet values for Production and testnet values for Preview, plus `CRON_SECRET`. `PUBLIC_HOST` is the deployment's own URL, because signed messages are checked against it.
-3. The keeper: `GET /api/v1/tick` with `Authorization: Bearer $CRON_SECRET` runs every keeper job once. `.github/workflows/tick.yml` calls it every 5 minutes; set the repository secret `CRON_SECRET` and the variable `MERIDIAN_URL`. On Vercel Pro a per-minute Vercel Cron on the same path also works, and `keeper/main.ts` still runs on any always-on host.
+2. Environment: every name in `.env.example`, mainnet values for Production and testnet values for Preview. `PUBLIC_HOST` is the deployment's own URL, because signed messages are checked against it.
+3. The keeper: a free Render web service at the repository root. Build command `pnpm install --frozen-lockfile`, start command `node --experimental-strip-types keeper/main.ts`, health check path `/` (the keeper answers `ok` on `PORT`). Set `NODE_VERSION=22.22.2`, `DB_DRIVER=pg`, and the keeper's names from `.env.example` with the same values as Vercel; only the keeper holds `NEAR_KEEPER_KEY`. A free service sleeps after 15 idle minutes, so an UptimeRobot monitor requests `/` every 5 minutes. Run exactly one keeper per `core`.
 
 ## Rehearsal
 

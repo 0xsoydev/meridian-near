@@ -56,7 +56,7 @@ Each step runs on testnet with the stack from "Run it".
 2. **Watch a runaway agent stop.** Start the stub rail with `STUB_TOKENS=150000`, give a key a $0.50 limit, and run `RUNAWAY=1 RK_KEY=<key> MODEL=glm-5.3 pnpm --filter demo-agent start`. It logs each request's cost, then stops at about request 20 with the approval link and a QR code. Your wallet paid exactly the $0.50 limit.
 3. **Run a swarm.** Install the skill from `/skills/meridian-swarm/` (see `/skill.md`), then in any git repository run `node swarm.ts 3 "fix the failing test" --budget 0.30`. The three cheapest models each work in their own worktree. You see a live table, then one patch per model and a JSON line for your agent. Ctrl-C returns the unspent budget.
 4. **Price a deposit from another chain.** On `/wallet`, choose Deposit, From another chain, and SOL on Solana. The panel shows a live price: "You send 0.12 SOL on Solana. $10.00 USDC lands in your Meridian wallet." On mainnet the same panel pays from MetaMask, Phantom or any browser wallet.
-5. **Move a key's balance to your wallet.** On `/wallet`, choose Show my agents, then Move to wallet. The wallet balance rises within a few minutes.
+5. **Move a key's balance to your wallet.** On `/wallet`, choose Show my agents, then Move to wallet. The wallet balance rises within a minute.
 6. **Recompute the index.** `/receipts` recomputes the index in your browser from the rollups on `core`.
 7. **Use MetaMask or Phantom.** Choose Connect wallet and pick your wallet. Approve an agent: your wallet shows a readable message ("Set a daily limit of 5 USDC for key …"), one signature sets the limit on `core`, and Meridian pays the network fee.
 
