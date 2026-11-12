@@ -34,6 +34,8 @@ const RAILS: Record<string, string> = {
   "opencode-go": "OpenCode Go",
   anthropic: "Anthropic",
   openai: "OpenAI",
+  "claude-code": "Claude Code",
+  codex: "Codex",
   stub: "Stub",
 };
 

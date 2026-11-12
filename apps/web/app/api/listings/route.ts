@@ -1,4 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { ensureAccount } from "../../../lib/accounts.ts";
 import { expectedHost, verifySigned } from "../../../lib/auth.ts";
@@ -6,28 +7,31 @@ import { matchBids } from "../../../lib/bids.ts";
 import { db } from "../../../lib/db.ts";
 import { fail } from "../../../lib/errors.ts";
 import { listingPriceError, parseCapacityMtok } from "../../../lib/listings.ts";
+import {
+  cookieName,
+  credentialMeta,
+  exchange,
+  isOAuthRail,
+  maskAccount,
+  probeOAuth,
+  readCode,
+  readCredential,
+  readStart,
+  sealCredential,
+  type Credential,
+  type Probe,
+} from "../../../lib/oauth.ts";
 import { catalog } from "../../../lib/rails.ts";
 import { accounts, listings } from "../../../lib/schema.ts";
-import { open, seal } from "../../../lib/secrets.ts";
+import { RAIL_IDS } from "../../../lib/types.ts";
 import type { Rail, SellerListings } from "../../../lib/types";
-
-const railIds = [
-  "stub",
-  "anthropic",
-  "openai",
-  "openrouter",
-  "commandcode",
-  "zen",
-  "opencode-go",
-  "near-ai",
-] as const;
 
 const intentSchema = z
   .object({
     domain: z.string(),
     action: z.literal("list"),
     issued_at: z.string(),
-    rail: z.enum(railIds),
+    rail: z.enum(RAIL_IDS),
     model: z.string().min(1).max(200),
     capacity_mtok: z.string().regex(/^\d{1,18}$/),
     price_micro_per_mtok: z.string().regex(/^\d{1,18}$/),
@@ -41,13 +45,12 @@ const bodySchema = z
     credential: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("key"), key: z.string().min(1).max(4096) }).strict(),
       z.object({ kind: z.literal("stored"), listing_id: z.uuid() }).strict(),
+      z.object({ kind: z.literal("oauth"), code: z.string().min(8).max(4096) }).strict(),
     ]),
   })
   .strict();
 
 const listedSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
-
-type Probe = { ok: true } | { ok: false; status: number; message: string };
 
 function authStatus(status: number): number {
   return status === 401 || status === 403 ? status : 502;
@@ -102,7 +105,7 @@ async function probeKey(rail: Rail, upstream: string, key: string): Promise<Prob
   }
 }
 
-async function storedKey(listingId: string, sellerId: string, railId: string): Promise<string | null> {
+async function storedCredential(listingId: string, sellerId: string, railId: string): Promise<Credential | null> {
   const [source] = await db()
     .select({ rail: listings.rail, sealed: listings.credentialCiphertext })
     .from(listings)
@@ -110,7 +113,7 @@ async function storedKey(listingId: string, sellerId: string, railId: string): P
     .limit(1);
   if (!source || source.rail !== railId) return null;
   try {
-    return open(source.sealed);
+    return readCredential(source.sealed);
   } catch {
     return null;
   }
@@ -132,6 +135,8 @@ export async function GET(request: Request): Promise<Response> {
           used: listings.usedTokens,
           reserved: listings.reservedTokens,
           status: listings.status,
+          credentialKind: listings.credentialKind,
+          credentialMeta: listings.credentialMeta,
         })
         .from(listings)
         .where(eq(listings.sellerId, account.id))
@@ -149,6 +154,10 @@ export async function GET(request: Request): Promise<Response> {
       used_tokens: row.used.toString(),
       reserved_tokens: row.reserved.toString(),
       status: row.status,
+      credential_kind: row.credentialKind,
+      credential_meta: row.credentialMeta
+        ? { ...row.credentialMeta, account: maskAccount(row.credentialMeta.account) }
+        : null,
     })),
   };
   return Response.json(result);
@@ -181,10 +190,31 @@ export async function POST(request: Request): Promise<Response> {
   if (capacityTokens === null) return fail(400, "invalid_request", "invalid capacity");
 
   const credential = parsed.data.credential;
-  const key = credential.kind === "key" ? credential.key : await storedKey(credential.listing_id, seller.id, rail.id);
-  if (key === null) return fail(404, "invalid_request", `no stored ${rail.id} key on that listing`);
+  const oauthRail = isOAuthRail(rail.id) ? rail.id : null;
+  let value: Credential | null = null;
 
-  const probe = await probeKey(rail, model.upstream, key);
+  if (oauthRail) {
+    if (credential.kind !== "oauth") {
+      return fail(400, "invalid_request", `${rail.id} takes a fresh account connection, not an API key or a stored grant`);
+    }
+    const jar = await cookies();
+    const start = readStart(jar.get(cookieName(oauthRail))?.value ?? "");
+    jar.delete(cookieName(oauthRail));
+    const pasted = readCode(oauthRail, credential.code);
+    if (!start || start.rail !== oauthRail || !pasted || pasted.state !== start.state) {
+      return fail(400, "invalid_request", "the connection expired; start it again");
+    }
+    value = await exchange(oauthRail, pasted.code, start.verifier).catch(() => null);
+    if (!value) return fail(400, "invalid_request", `${rail.id} did not accept the connection`);
+    if (value.kind !== "oauth") return fail(400, "invalid_request", `${rail.id} did not return an account`);
+  } else {
+    if (credential.kind === "oauth") return fail(400, "invalid_request", `${rail.id} takes an API key`);
+    if (credential.kind === "key") value = { kind: "api_key", key: credential.key };
+    else value = await storedCredential(credential.listing_id, seller.id, rail.id);
+    if (!value || value.kind !== "api_key") return fail(404, "invalid_request", `no stored ${rail.id} key on that listing`);
+  }
+
+  const probe = value.kind === "oauth" ? await probeOAuth(value, model.upstream) : await probeKey(rail, model.upstream, value.key);
   if (!probe.ok) {
     if (probe.status === 401 || probe.status === 403) return fail(401, "invalid_api_key", "credential rejected by the rail");
     if (probe.status === 400 || probe.status === 404) {
@@ -200,7 +230,9 @@ export async function POST(request: Request): Promise<Response> {
       sellerId: seller.id,
       rail: rail.id,
       model: model.canonical,
-      credentialCiphertext: seal(key),
+      credentialCiphertext: sealCredential(value),
+      credentialKind: value.kind,
+      credentialMeta: value.kind === "oauth" ? credentialMeta(value) : null,
       priceMicroPerMtok: price,
       capacityTokens,
       status: "active",

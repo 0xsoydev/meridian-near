@@ -1,0 +1,1 @@
+ALTER TABLE "listings" ADD CONSTRAINT "listings_credential_kind" CHECK ("listings"."credential_kind" in ('api_key','oauth'));

@@ -59,6 +59,10 @@ const ZEN_MODELS = [
   "qwen3.8-max",
 ];
 
+const CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
+
+const GPT_MODELS = ["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"];
+
 const GO_MODELS = [
   "glm-5.3",
   "glm-5.3-flash",
@@ -90,6 +94,7 @@ function configs(): RailConfig[] {
   const openrouter = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
   const commandcode = process.env.COMMANDCODE_BASE_URL ?? "https://api.commandcode.ai/provider/v1";
   const anthropic = process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1";
+  const claudeCode = process.env.CLAUDE_CODE_BASE_URL || anthropic;
   const openai = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
   const list: RailConfig[] = [
     {
@@ -140,7 +145,7 @@ function configs(): RailConfig[] {
       modelsUrl: `${anthropic}/models`,
       check: "models",
       extraHeaders: { "anthropic-version": "2023-06-01" },
-      models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"],
+      models: CLAUDE_MODELS,
     },
     {
       id: "openai",
@@ -149,7 +154,23 @@ function configs(): RailConfig[] {
       check: "models",
       extraHeaders: {},
       maxTokensField: "max_completion_tokens",
-      models: ["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"],
+      models: GPT_MODELS,
+    },
+    {
+      id: "claude-code",
+      baseUrl: claudeCode,
+      modelsUrl: `${claudeCode}/models`,
+      check: "models",
+      extraHeaders: { "anthropic-version": "2023-06-01", "anthropic-beta": "oauth-2025-04-20" },
+      models: CLAUDE_MODELS,
+    },
+    {
+      id: "codex",
+      baseUrl: process.env.CODEX_BASE_URL || "https://chatgpt.com/backend-api/codex",
+      modelsUrl: `${openai}/models`,
+      check: "models",
+      extraHeaders: {},
+      models: GPT_MODELS,
     },
   ];
   const stub = process.env.STUB_RAIL_URL;

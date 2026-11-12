@@ -18,6 +18,8 @@ export const RAIL_NAMES: Record<RailId, string> = {
   "opencode-go": "OpenCode Go",
   anthropic: "Anthropic",
   openai: "OpenAI",
+  "claude-code": "Claude Code",
+  codex: "Codex",
   stub: "Stub rail",
 };
 

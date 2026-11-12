@@ -6,6 +6,16 @@ import { asks, byCheapest } from "../../../../../lib/book.ts";
 import { db } from "../../../../../lib/db.ts";
 import { fail } from "../../../../../lib/errors.ts";
 import { release, reserve, reservePrepaid, settle, type SettleInput } from "../../../../../lib/ledger.ts";
+import {
+  inferenceHeaders,
+  inferenceUrl,
+  isOAuthRail,
+  needsRefresh,
+  OAuthError,
+  readCredential,
+  refreshListing,
+  type OAuthBundle,
+} from "../../../../../lib/oauth.ts";
 import { refill, topUp } from "../../../../../lib/pay.ts";
 import { fetchProof } from "../../../../../lib/proof.ts";
 import {
@@ -19,6 +29,7 @@ import {
 import { catalog, reference } from "../../../../../lib/rails.ts";
 import { listings, prepaid, type KeyRow } from "../../../../../lib/schema.ts";
 import { open } from "../../../../../lib/secrets.ts";
+import { anthropicBody, responsesBody, translateAnthropic, translateCodex } from "../../../../../lib/translate.ts";
 import type { Pricing, Rail } from "../../../../../lib/types";
 
 export const maxDuration = 300;
@@ -283,11 +294,7 @@ async function attempt(input: Attempt): Promise<Response | null> {
 
   let response: Response;
   try {
-    response = await fetchUpstream(
-      candidate,
-      upstreamPayload(input.body, candidate.upstream, input.maxTokens, candidate.rail.maxTokensField ?? "max_tokens"),
-      controller.signal,
-    );
+    response = await fetchUpstream(candidate, input.body, input.maxTokens, controller.signal);
   } catch {
     const reason: unknown = controller.signal.reason;
     if (reason === "client" || reason === "deadline") {
@@ -363,19 +370,80 @@ function upstreamPayload(
   return { ...rest, ...limit, model: upstream, stream: false };
 }
 
-function fetchUpstream(candidate: Candidate, payload: Record<string, unknown>, signal: AbortSignal): Promise<Response> {
+function fetchOpenAI(
+  candidate: Candidate,
+  key: string,
+  body: Body,
+  maxTokens: number,
+  signal: AbortSignal,
+): Promise<Response> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
-    authorization: `Bearer ${open(candidate.credential)}`,
+    authorization: `Bearer ${key}`,
     ...candidate.rail.extraHeaders,
   };
   if (candidate.rail.id === "opencode-go") headers["x-opencode-session"] = randomUUID();
   return fetch(`${candidate.rail.baseUrl}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify(payload),
+    body: JSON.stringify(upstreamPayload(body, candidate.upstream, maxTokens, candidate.rail.maxTokensField ?? "max_tokens")),
     signal,
   });
+}
+
+async function refreshed(candidate: Candidate, force = false): Promise<OAuthBundle> {
+  const sealed = await refreshListing(candidate.listingId, candidate.credential, force);
+  candidate.credential = sealed;
+  const next = readCredential(sealed);
+  if (next.kind !== "oauth") throw new Error("the listing no longer holds a connected account");
+  return next;
+}
+
+function sendOAuth(
+  candidate: Candidate,
+  bundle: OAuthBundle,
+  body: Body,
+  maxTokens: number,
+  signal: AbortSignal,
+): Promise<Response> {
+  if (bundle.rail === "codex") {
+    return fetch(inferenceUrl(bundle), {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "text/event-stream", ...inferenceHeaders(bundle) },
+      body: JSON.stringify(responsesBody(body, candidate.upstream, maxTokens)),
+      signal,
+    }).then((response) => (response.ok ? translateCodex(response, candidate.model, body.stream === true) : response));
+  }
+  return fetch(inferenceUrl(bundle), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...inferenceHeaders(bundle), ...candidate.rail.extraHeaders },
+    body: JSON.stringify(anthropicBody(body, candidate.upstream, maxTokens)),
+    signal,
+  }).then((response) => (response.ok ? translateAnthropic(response, candidate.model, body.stream === true) : response));
+}
+
+async function fetchUpstream(
+  candidate: Candidate,
+  body: Body,
+  maxTokens: number,
+  signal: AbortSignal,
+): Promise<Response> {
+  const credential = readCredential(candidate.credential);
+  if (credential.kind === "api_key") return fetchOpenAI(candidate, credential.key, body, maxTokens, signal);
+  if (credential.rail !== candidate.rail.id) throw new Error("the listing's grant belongs to another rail");
+
+  let bundle = needsRefresh(credential) ? await refreshed(candidate).catch(() => credential) : credential;
+  const response = await sendOAuth(candidate, bundle, body, maxTokens, signal);
+  if (response.status !== 401) return response;
+
+  try {
+    bundle = await refreshed(candidate, true);
+  } catch (error) {
+    if (error instanceof OAuthError && error.terminal) return response;
+    return Response.json({ error: { message: "the credential refresh was unavailable" } }, { status: 502 });
+  }
+  await response.body?.cancel().catch(() => undefined);
+  return sendOAuth(candidate, bundle, body, maxTokens, signal);
 }
 
 async function rejected(candidate: Candidate, response: Response): Promise<Response | null> {
@@ -393,10 +461,11 @@ async function rejected(candidate: Candidate, response: Response): Promise<Respo
   if (status === 429) {
     await response.body?.cancel().catch(() => undefined);
     const retryAfter = Number(response.headers.get("retry-after"));
-    const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 60;
+    const reset = Number(response.headers.get("x-codex-primary-reset-after-seconds"));
+    const seconds = [retryAfter, reset].find((value) => Number.isFinite(value) && value > 0) ?? 60;
     await db()
       .update(listings)
-      .set({ throttledUntil: new Date(Date.now() + seconds * 1000) })
+      .set({ throttledUntil: new Date(Date.now() + Math.min(seconds, 604_800) * 1000) })
       .where(eq(listings.id, candidate.listingId));
     return null;
   }
@@ -407,7 +476,12 @@ async function rejected(candidate: Candidate, response: Response): Promise<Respo
 
   const error = await upstreamError(response);
   if (status === 403) {
-    if (error.code === "upgrade_required" || error.type === "authentication_error") {
+    if (
+      error.code === "upgrade_required" ||
+      error.type === "authentication_error" ||
+      error.type === "permission_error" ||
+      isOAuthRail(candidate.rail.id)
+    ) {
       await db().update(listings).set({ status: "invalid" }).where(eq(listings.id, candidate.listingId));
       return null;
     }
@@ -434,6 +508,8 @@ async function upstreamError(response: Response): Promise<UpstreamError> {
       code: shaped.data.error.code ?? "",
     };
   }
+  const detail = z.object({ detail: z.string() }).passthrough().safeParse(parsed);
+  if (detail.success) return { message: detail.data.detail.slice(0, 300), type: "", code: "" };
   return { message: text.slice(0, 300) || `upstream returned ${response.status}`, type: "", code: "" };
 }
 

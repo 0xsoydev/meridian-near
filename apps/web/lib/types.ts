@@ -1,12 +1,26 @@
-export type RailId =
-  | "stub"
-  | "anthropic"
-  | "openai"
-  | "openrouter"
-  | "commandcode"
-  | "zen"
-  | "opencode-go"
-  | "near-ai";
+export const RAIL_IDS = [
+  "stub",
+  "anthropic",
+  "openai",
+  "openrouter",
+  "commandcode",
+  "zen",
+  "opencode-go",
+  "near-ai",
+  "claude-code",
+  "codex",
+] as const;
+
+export type RailId = (typeof RAIL_IDS)[number];
+
+export type OAuthRail = Extract<RailId, "claude-code" | "codex">;
+
+export type CredentialKind = "api_key" | "oauth";
+
+export type CredentialMeta = {
+  account: string | null;
+  plan: string | null;
+};
 
 export type Verifiability = "tee" | null;
 
@@ -311,6 +325,8 @@ export type SellerListing = {
   used_tokens: string;
   reserved_tokens: string;
   status: string;
+  credential_kind: CredentialKind;
+  credential_meta: CredentialMeta | null;
 };
 
 export type SellerListings = { listings: SellerListing[] };

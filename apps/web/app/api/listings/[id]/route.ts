@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { z } from "zod";
 import { ensureAccount } from "../../../../lib/accounts.ts";
 import { expectedHost, verifySigned } from "../../../../lib/auth.ts";
@@ -6,7 +6,7 @@ import { db } from "../../../../lib/db.ts";
 import { fail } from "../../../../lib/errors.ts";
 import { listingPriceError, parseCapacityMtok } from "../../../../lib/listings.ts";
 import { catalog } from "../../../../lib/rails.ts";
-import { listings } from "../../../../lib/schema.ts";
+import { listings, offers, prepaid, usage } from "../../../../lib/schema.ts";
 
 const base = {
   domain: z.string(),
@@ -100,9 +100,34 @@ export async function DELETE(
   if (!row) return fail(404, "invalid_request", "unknown listing");
   if (row.reservedTokens > 0n) return fail(409, "invalid_request", "a request is in flight on this listing; retry in a moment");
 
+  if (row.credentialKind === "oauth") {
+    const [held] = await db()
+      .select({ id: prepaid.id })
+      .from(prepaid)
+      .where(and(eq(prepaid.listingId, id), gt(prepaid.tokensRemaining, 0n)))
+      .limit(1);
+    const [escrowed] = await db()
+      .select({ id: offers.id })
+      .from(offers)
+      .where(and(eq(offers.listingId, id), eq(offers.status, "open"), gt(offers.tokens, 0n)))
+      .limit(1);
+    const [inflight] = await db()
+      .select({ id: usage.id })
+      .from(usage)
+      .where(and(eq(usage.listingId, id), eq(usage.status, "open")))
+      .limit(1);
+    if (held || escrowed || inflight) {
+      return fail(409, "invalid_request", "a request or prepaid MTokens remain on this listing; retry when they clear");
+    }
+  }
+
   const [updated] = await db()
     .update(listings)
-    .set({ status: "cancelled", clientNonce: intent.data.client_nonce })
+    .set({
+      status: "cancelled",
+      ...(row.credentialKind === "oauth" ? { credentialCiphertext: "", credentialMeta: null } : {}),
+      clientNonce: intent.data.client_nonce,
+    })
     .where(and(eq(listings.id, id), eq(listings.sellerId, row.sellerId)))
     .returning();
   if (!updated) return fail(404, "invalid_request", "unknown listing");

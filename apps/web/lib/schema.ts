@@ -7,12 +7,14 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { CredentialKind, CredentialMeta } from "./types.ts";
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => "bytea",
@@ -58,6 +60,8 @@ export const listings = pgTable(
     rail: text("rail").notNull(),
     model: text("model").notNull(),
     credentialCiphertext: text("credential_ciphertext").notNull(),
+    credentialKind: text("credential_kind").$type<CredentialKind>().notNull().default("api_key"),
+    credentialMeta: jsonb("credential_meta").$type<CredentialMeta>(),
     priceMicroPerMtok: bigint("price_micro_per_mtok", { mode: "bigint" }).notNull(),
     capacityTokens: bigint("capacity_tokens", { mode: "bigint" }).notNull(),
     usedTokens: bigint("used_tokens", { mode: "bigint" }).notNull().default(sql`0`),
@@ -72,6 +76,7 @@ export const listings = pgTable(
     check("listings_capacity_bound", sql`${t.usedTokens} + ${t.reservedTokens} <= ${t.capacityTokens}`),
     check("listings_price_positive", sql`${t.priceMicroPerMtok} > 0`),
     check("listings_status", sql`${t.status} in ('active','exhausted','throttled','invalid','cancelled')`),
+    check("listings_credential_kind", sql`${t.credentialKind} in ('api_key','oauth')`),
     index("listings_model_status_price_idx").on(t.model, t.status, t.priceMicroPerMtok),
   ],
 );

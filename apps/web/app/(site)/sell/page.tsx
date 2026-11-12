@@ -10,6 +10,7 @@ export default async function SellPage() {
     .filter((rail) => rail.enabled)
     .map((rail) => ({
       id: rail.id,
+      oauth: rail.id === "claude-code" || rail.id === "codex",
       models: rail.models
         .map((model) => ({ id: model.canonical, list: blended({ prompt: model.listPrompt, completion: model.listCompletion }).toString() }))
         .sort((a, b) => a.id.localeCompare(b.id)),

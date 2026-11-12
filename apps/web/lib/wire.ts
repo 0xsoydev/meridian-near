@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RAIL_IDS } from "./types.ts";
 import type {
   ApprovalView,
   Bid,
@@ -31,7 +32,7 @@ import type {
 } from "./types";
 
 const int = z.string().regex(/^-?\d+$/);
-const railId = z.enum(["stub", "anthropic", "openai", "openrouter", "commandcode", "zen", "opencode-go", "near-ai"]);
+const railId = z.enum(RAIL_IDS);
 const list = <T>(item: z.ZodType<T>) => z.object({ data: z.array(item) });
 
 export const anything = z.unknown();
@@ -276,9 +277,12 @@ export const listingsSchema: z.ZodType<SellerListings> = z.object({
       used_tokens: int,
       reserved_tokens: int,
       status: z.string(),
+      credential_kind: z.enum(["api_key", "oauth"]),
+      credential_meta: z.object({ account: z.string().nullable(), plan: z.string().nullable() }).nullable(),
     }),
   ),
 });
+
 
 export const payoutsSchema: z.ZodType<SellerPayouts> = z.object({
   network: z.string(),

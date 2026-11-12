@@ -30,7 +30,7 @@ import { useNear } from "../providers";
 const TAKE_BPS = 1000n;
 const ORDINALS = ["1st", "2nd", "3rd"];
 
-type Offered = { id: string; models: ReadonlyArray<{ id: string; list: string }> };
+type Offered = { id: string; oauth: boolean; models: ReadonlyArray<{ id: string; list: string }> };
 type Notice = { tone: "up" | "down"; text: string };
 type Draft = { price: string; capacity: string };
 type Problem = { field: "price" | "capacity" | "key" | "send"; text: string };
@@ -83,6 +83,8 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
   const [price, setPrice] = useState("");
   const [capacity, setCapacity] = useState("20");
   const [apiKey, setApiKey] = useState("");
+  const [oauthCode, setOauthCode] = useState("");
+  const [oauthStarted, setOauthStarted] = useState(false);
   const [source, setSource] = useState("");
   const [listings, setListings] = useState<SellerListing[] | null>(null);
   const [payouts, setPayouts] = useState<SellerPayouts | null>(null);
@@ -135,6 +137,7 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
     };
   }, [model]);
 
+  const oauth = rails.find((entry) => entry.id === rail)?.oauth ?? false;
   const models = rails.find((entry) => entry.id === rail)?.models ?? [];
   const chosen = models.find((entry) => entry.id === model) ?? null;
   const list = chosen ? BigInt(chosen.list) : null;
@@ -142,7 +145,9 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
   const mtok = /^\d{1,9}$/.test(capacity.trim()) ? BigInt(capacity.trim()) : 0n;
   const above = micro !== null && list !== null && micro > list;
   const ceiling = micro !== null && mtok > 0n ? sellerEarning(charge(mtok * 1_000_000n, micro), TAKE_BPS) : null;
-  const reusable = (listings ?? []).filter((listing) => listing.rail === rail && listing.status !== "cancelled");
+  const reusable = (listings ?? []).filter(
+    (listing) => !oauth && listing.rail === rail && listing.status !== "cancelled",
+  );
   const provider = railName(rail);
   const index = status?.markets.find((market) => market.model === model)?.index_micro_per_mtok ?? null;
 
@@ -163,7 +168,13 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
     if (micro === null || micro === 0n) return flag("price", "Enter a price in USD per MTok, like 0.17.");
     if (above && list !== null) return flag("price", `Price it at or below ${provider}'s list price of ${usd(list)}.`);
     if (mtok === 0n) return flag("capacity", "Enter the capacity in whole MTok, like 20.");
-    if (!source && apiKey.trim() === "") return flag("key", `Paste your ${provider} API key, or reuse one you listed before.`);
+    if (!source) {
+      if (oauth && oauthCode.trim() === "") {
+        setOauthStarted(true);
+        return flag("key", `Connect ${provider} and paste the code it shows.`);
+      }
+      if (!oauth && apiKey.trim() === "") return flag("key", `Paste your ${provider} API key, or reuse one you listed before.`);
+    }
     setBusy("list");
     setProblem(null);
     const signed = await sign("list", {
@@ -178,16 +189,27 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
       flag("send", "The wallet didn't sign, so nothing was listed.");
       return;
     }
+    const credential = source
+      ? { kind: "stored", listing_id: source }
+      : oauth
+        ? { kind: "oauth", code: oauthCode.trim() }
+        : { kind: "key", key: apiKey.trim() };
     const result = await api("/api/listings", listingCreatedSchema, {
       method: "POST",
-      body: JSON.stringify({ signed, credential: source ? { kind: "stored", listing_id: source } : { kind: "key", key: apiKey.trim() } }),
+      body: JSON.stringify({ signed, credential }),
     });
     setBusy(null);
     if (!result.ok) {
+      if (oauth) {
+        setOauthCode("");
+        setOauthStarted(false);
+      }
       flag(source ? "send" : "key", result.message);
       return;
     }
     setApiKey("");
+    setOauthCode("");
+    setOauthStarted(false);
     setNotice({ tone: "up", text: `Listed ${formatMtok(mtok * 1_000_000n)} MTok of ${chosen.id} at ${usd(micro)}. It is in the book now.` });
     await load();
   };
@@ -271,6 +293,8 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                         setRail(next);
                         setModel(preferred(rails.find((entry) => entry.id === next)?.models ?? []));
                         setSource("");
+                        setOauthStarted(false);
+                        setOauthCode("");
                       }}
                     >
                       {rails.map((entry) => (
@@ -349,18 +373,64 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                 <Step n={5}>
                   <div className="flex flex-col gap-3">
                     {reusable.length > 0 ? (
-                      <Field label="Key">
+                      <Field label="Credential">
                         <Select value={source} onChange={(event) => setSource(event.target.value)}>
-                          <option value="">Paste a new key</option>
+                          <option value="">Connect a new one</option>
                           {reusable.map((listing) => (
                             <option key={listing.listing_id} value={listing.listing_id}>
-                              Reuse the key from {listing.model}
+                              Reuse the {listing.credential_kind === "oauth" ? "account" : "key"} from {listing.model}
                             </option>
                           ))}
                         </Select>
                       </Field>
                     ) : null}
-                    {source === "" ? (
+                    {source === "" && oauth ? (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <a
+                            href={`/api/v1/oauth/start?rail=${encodeURIComponent(rail)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={() => {
+                              setProblem(null);
+                              setOauthStarted(true);
+                            }}
+                            className={SECONDARY}
+                          >
+                            {oauthStarted ? "Open the page again" : `Connect ${provider}`}
+                          </a>
+                          <span className="text-[13px] leading-[20px] text-muted">
+                            {oauthStarted ? "Authorize, then paste the code below." : "Opens the provider in a new tab."}
+                          </span>
+                        </div>
+                        {oauthStarted ? (
+                          <Field
+                            label="Code"
+                            alert={problem?.field === "key"}
+                            note={
+                              rail === "codex"
+                                ? "Paste the full address-bar link from the localhost page. It expires in ten minutes."
+                                : "Paste the whole code, including everything after the #. It expires in ten minutes."
+                            }
+                          >
+                            <input
+                              ref={keyRef}
+                              aria-invalid={problem?.field === "key"}
+                              value={oauthCode}
+                              onChange={(event) => setOauthCode(event.target.value)}
+                              autoComplete="off"
+                              spellCheck={false}
+                              className={`${INPUT} font-mono text-[13px]`}
+                            />
+                          </Field>
+                        ) : null}
+                        {problem?.field === "key" ? (
+                          <p role="status" className="text-[13px] leading-[20px] text-down">
+                            {problem.text}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : source === "" ? (
                       <Field
                         label={`${provider} API key`}
                         alert={problem?.field === "key"}
@@ -388,7 +458,9 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
               <div className="flex flex-col gap-3 pl-8">
                 <CommitButton type="submit" disabled={busy !== null} aria-busy={busy === "list"} className="self-start">
                   {busy === "list"
-                    ? "Checking the key"
+                    ? oauth
+                      ? "Connecting"
+                      : "Checking the key"
                     : !accountId
                       ? "Connect wallet to list"
                       : micro !== null && mtok > 0n
@@ -496,7 +568,16 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
               return (
                 <tr key={listing.listing_id} className={ROW}>
                   <td className={TD}>{listing.model}</td>
-                  <td className={TD}>{railName(listing.rail)}</td>
+                  <td className={TD}>
+                    <div className="flex flex-col">
+                      <span>{railName(listing.rail)}</span>
+                      {listing.credential_meta ? (
+                        <span className="text-[12px] text-muted">
+                          {[listing.credential_meta.account, listing.credential_meta.plan].filter(Boolean).join(" · ")}
+                        </span>
+                      ) : null}
+                    </div>
+                  </td>
                   <td className={`${TD} ${listing.status === "active" ? "text-up" : "text-muted"}`}>{label(listing.status)}</td>
                   <td className={TD}>
                     <div className="flex items-center gap-2">
@@ -544,9 +625,13 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                           {busy === `amend-${listing.listing_id}` ? "Signing" : "Save"}
                         </button>
                         <ConfirmButton
-                          label="Delist"
-                          confirmLabel="Delist"
-                          question="Buyers stop drawing on it. Earnings so far are still paid."
+                          label={listing.credential_kind === "oauth" ? "Disconnect" : "Delist"}
+                          confirmLabel={listing.credential_kind === "oauth" ? "Disconnect" : "Delist"}
+                          question={
+                            listing.credential_kind === "oauth"
+                              ? "The listing stops and its stored grant is erased. Earnings so far are still paid."
+                              : "Buyers stop drawing on it. Earnings so far are still paid."
+                          }
                           busy={busy === `delist-${listing.listing_id}` ? "Delisting" : null}
                           disabled={busy !== null}
                           onConfirm={() => void delist(listing)}
