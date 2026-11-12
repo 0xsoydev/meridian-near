@@ -77,7 +77,7 @@ Put the account in `NEAR_FAUCET_ID` and its private key from `~/.near-credential
 pnpm --filter web seed
 ```
 
-It creates the house listing on `NEARAI_API_KEY` and prints the owner commands: one `list_market` per model, `fund_vault`, and `set_cap` for the shared demo key. Run them once. With `STUB_RAIL_URL` it also lists the four stub models at different prices, so a local swarm has models to pick.
+It creates the house listing on `NEARAI_API_KEY` (`glm-5.3-flash` at $0.18; run it again with `SEED_MODEL` and `SEED_PRICE_MICRO`, at or under NEAR AI's list price, for each other market) and prints the owner commands: one `list_market` per model, `fund_vault`, and `set_cap` for the shared demo key. Run them once. With `STUB_RAIL_URL` it also lists the four stub models at different prices, so a local swarm has models to pick.
 
 ## Keeper
 
