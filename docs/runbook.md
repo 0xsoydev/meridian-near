@@ -19,7 +19,7 @@ near contract call-function as-transaction <usdc> storage_deposit \
 
 ## Environment
 
-Copy `.env.example` to `apps/web/.env`. The keeper and the agent read the same file. `NEAR_WEB_KEY` is the web function-call key; `NEAR_KEEPER_KEY` is the keeper's; `NEAR_RELAY_KEY` is the relay's. `SOLANA_RPC_URL` is optional; without it Solana calls use the public mainnet RPC.
+Copy `.env.example` to `apps/web/.env`. The keeper and the agent read the same file. `NEAR_WEB_KEY` is the web function-call key; `NEAR_KEEPER_KEY` is the keeper's; `NEAR_RELAY_KEY` is the relay's. `NEAR_FAUCET_ID` and `NEAR_FAUCET_KEY` name the testnet faucet account (below). `SOLANA_RPC_URL` is optional; without it Solana calls use the public mainnet RPC.
 
 ## Database
 
@@ -54,6 +54,23 @@ near account add-key ops.<team>.testnet grant-function-call-access \
   autogenerate-new-keypair save-to-keychain network-config testnet sign-with-keychain send
 ```
 
+## Faucet (testnet)
+
+The live faucet is `meridian-faucet.testnet`. To make another, create the account, register it on test USDC and mint into it:
+
+```sh
+near account create-account sponsor-by-faucet-service <faucet>.testnet autogenerate-new-keypair \
+  save-to-legacy-keychain network-config testnet create
+near contract call-function as-transaction usdc.fakes.testnet storage_deposit \
+  json-args '{"account_id":"<faucet>.testnet","registration_only":true}' prepaid-gas '30 Tgas' \
+  attached-deposit '0.00125 NEAR' sign-as <faucet>.testnet network-config testnet sign-with-legacy-keychain send
+near contract call-function as-transaction usdc.fakes.testnet mint \
+  json-args '{"account_id":"<faucet>.testnet","amount":"10000000000"}' prepaid-gas '30 Tgas' \
+  attached-deposit '0 NEAR' sign-as <faucet>.testnet network-config testnet sign-with-legacy-keychain send
+```
+
+Put the account in `NEAR_FAUCET_ID` and its private key from `~/.near-credentials/testnet/<faucet>.testnet.json` in `NEAR_FAUCET_KEY`. Each claim sends 10 test USDC.
+
 ## Seed
 
 ```sh
@@ -73,7 +90,7 @@ It publishes rollups every minute, posts the index every three, liquidates every
 ## Deploy
 
 1. Vercel: import the repository and set the root directory to `apps/web`. `apps/web/vercel.json` runs `pnpm db:migrate && pnpm build`, so the schema follows each deploy. Add Neon from the Storage tab; it sets `DATABASE_URL`.
-2. Environment: every name in `.env.example`, mainnet values for Production and testnet values for Preview. `PUBLIC_HOST` is the deployment's own URL, because signed messages are checked against it.
+2. Environment: every name in `.env.example`, with testnet values: the hosted demo runs on NEAR testnet. `PUBLIC_HOST` is the deployment's own URL, because signed messages are checked against it.
 3. The keeper: a free Render web service at the repository root. Build command `pnpm install --frozen-lockfile`, start command `node --experimental-strip-types keeper/main.ts`, health check path `/` (the keeper answers `ok` on `PORT`). Set `NODE_VERSION=22.22.2`, `DB_DRIVER=pg`, and the keeper's names from `.env.example` with the same values as Vercel; only the keeper holds `NEAR_KEEPER_KEY`. A free service sleeps after 15 idle minutes, so an UptimeRobot monitor requests `/` every 5 minutes. Run exactly one keeper per `core`.
 
 ## Rehearsal
@@ -91,7 +108,7 @@ It publishes rollups every minute, posts the index every three, liquidates every
 11. Move to wallet on `/wallet`: the key's float leaves it and the wallet balance rises on the next keeper run.
 12. Deposit from another chain on `/wallet`: on testnet a token on Solana shows a real mainnet price; paying needs mainnet.
 13. `RK_KEY=<key> pnpm --filter web exec node --experimental-strip-types scripts/e2e.ts` checks the swarm money path: spent plus returned equals the budget.
-14. Connect MetaMask or Phantom from the picker, approve an agent with one signature, and on mainnet pay a deposit with the same wallet. `GET /api/v1/signed?owner=<id>` shows the owner's next nonce.
+14. Connect MetaMask or Phantom from the picker, choose Get 10 test USDC, approve an agent with one signature, then withdraw to a NEAR testnet account. On mainnet, pay a deposit with the same wallet instead. `GET /api/v1/signed?owner=<id>` shows the owner's next nonce.
 15. Optional, with a real subscription: pick Claude Code or Codex on `/sell`, connect, paste the code, and list one model. A second request must refresh without a new login; delist erases the grant and refuses while prepaid MTokens remain.
 
 ## Recovery

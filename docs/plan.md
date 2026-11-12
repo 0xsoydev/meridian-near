@@ -23,7 +23,7 @@ Built: `claude-code` and `codex` (§9.15). Each seller connects their own subscr
 
 | Rule | Source |
 |---|---|
-| Everything runs on NEAR: mainnet for the demo, testnet for rehearsal (`NEAR_NETWORK`) | user |
+| Everything runs on NEAR. The hosted demo runs on testnet with test USDC; mainnet is the same build with mainnet values (`NEAR_NETWORK`) | user |
 | No Hedera, 0G, World ID, x402, Privy, or EVM code | user |
 | Sellers may list Claude Code and Codex accounts; the grant never leaves the server | user |
 | Agents never hold a NEAR key, and no screen asks anyone for a private key | user |
@@ -313,7 +313,7 @@ Perp fees and the 10 % take land in `treasury`. The owner takes revenue with `pa
 - **Pay with a wallet.** Browser wallets announce themselves through EIP-6963, so the page lists every installed EVM wallet by its own name and icon, with no wallet library. On an EVM chain the page asks the wallet for its address (the refund address), quotes, switches the chain, and sends the native amount or an ERC-20 `transfer(depositAddress, amountIn)`. Then `POST /v0/deposit/submit` with the hash, and the status polling takes over. Every step has words: confirm in the wallet, switch chains, cancelled ("Nothing was sent"), paid and waiting for the chain, converting, done, refunded.
 - **Withdraw.** Quote from `nep141:<NEAR_USDC_ID>` to the chosen token at the user's address, `refundTo` = the user's NEAR account. One prompt: `usdc.storage_deposit(deposit_address)`, then `core.withdraw(amount, deposit_address)`.
 - `customRecipientMsg` is marked experimental, so the first real run moves 0.2 USDC. Fallback: deliver to the owner's NEAR account, then one `ft_transfer_call`.
-- Testnet: 1Click only knows mainnet, so testnet quotes are always `dry` and use mainnet USDC and `intents.near` in place of `core` and the user's account. They are price previews; the page says deposits from other chains run on mainnet and disables the wallet buttons. The UI minimum is $1. `ONECLICK_API_KEY` is optional and lowers the fee.
+- Testnet: 1Click only knows mainnet, so on testnet the wallet hides this route and never asks 1Click for tokens. Deposits come from the faucet (§9.16) or a NEAR testnet account, and withdrawals go to a NEAR testnet account. The UI minimum is $1. `ONECLICK_API_KEY` is optional and lowers the fee.
 
 ### 9.12 NEAR AI proofs
 
@@ -364,6 +364,10 @@ Claude Code and Codex list from the seller's subscription instead of an API key.
 5. `DELETE /api/listings/:id` keeps API keys sealed so prepaid MTokens keep serving, and erases an OAuth grant once the listing has no prepaid MTokens left. The seller sees the account and plan on each listing.
 
 Claude requests go to `/v1/messages` with `anthropic-beta: oauth-2025-04-20` and the Claude Code system preamble, and its answers and SSE are translated to OpenAI shapes. Codex requests use the Responses backend and its SSE is translated, tools included.
+
+### 9.16 Testnet faucet (`app/api/v1/faucet/route.ts`)
+
+MetaMask and Phantom owners have no NEAR account to hold test USDC, so on testnet the wallet offers Get 10 test USDC. `POST /api/v1/faucet` takes the owner's signed `faucet` message (§9.13) and, while their Meridian wallet holds under 1 USDC, sends 10 USDC from `NEAR_FAUCET_ID` to `core` with `{"fund":{"to":"<owner>"}}`, then checks the wallet rose. It answers 404 on mainnet. The faucet account holds only `usdc.fakes.testnet`, which anyone can `mint`, and testnet NEAR. Its key is full-access because NEP-141 transfers attach 1 yoctoNEAR. MetaMask and Phantom owners withdraw to a NEAR account they type; the relay refuses ids that aren't NEAR accounts and named accounts that don't exist.
 
 ## 10. Keeper (`keeper/main.ts`, `jobs.ts`)
 
@@ -430,7 +434,9 @@ UX rules:
 | `NEAR_OPS_ID` | web, keeper | `ops.<team>.near` |
 | `NEAR_WEB_KEY` | web | `ed25519:…`, function-call key on `ops` for `pull` |
 | `NEAR_KEEPER_KEY` | keeper | `ed25519:…`, function-call key on `ops` for `post`, `log_rollups`, `liquidate`, `payout` |
-| `NEAR_USDC_ID`, `NEXT_PUBLIC_NEAR_USDC_ID` | all | mainnet `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1`, testnet `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` |
+| `NEAR_USDC_ID`, `NEXT_PUBLIC_NEAR_USDC_ID` | all | mainnet `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1`, testnet `usdc.fakes.testnet` |
+| `NEAR_RELAY_KEY` | web | `ed25519:…`, function-call key on `ops` for `set_cap_signed`, `withdraw_signed`, `modify_signed` |
+| `NEAR_FAUCET_ID`, `NEAR_FAUCET_KEY` | web | testnet only: the faucet account and its full-access key (§9.16) |
 | `ONECLICK_API_KEY` | web | optional |
 | `NEARAI_API_KEY` | seed | Meridian's NEAR AI key for the house listing |
 | `DEMO_KEYS` | web | `1` turns on demo keys |
@@ -457,6 +463,7 @@ Removed: every `HEDERA_*`, `HCS_TOPIC_ID`, `X402_FACILITATOR_URLS`, `MIRROR_NODE
 - The picker finds Ethereum wallets through EIP-6963 and Solana wallets through the Wallet Standard events, with no libraries. NEAR wallets stay behind NEAR Connect.
 - Pay with a Solana wallet: `lib/solana.ts` builds the transfer by hand (system transfer for SOL; idempotent associated-token-account create plus `transferChecked` for tokens). The public Solana RPC refuses browsers, so `/api/v1/solana` relays `getLatestBlockhash` and `getAccountInfo` only.
 - No prompts or completions are stored. NEAR AI proofs hold hashes and signatures only.
+- The faucet runs on testnet only; its key can move only test USDC and testnet NEAR.
 - No secrets in the repo.
 
 ## 15. Milestones
