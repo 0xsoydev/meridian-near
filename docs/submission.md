@@ -10,7 +10,7 @@
 
 - Repository: https://github.com/0xsoydev/meridian-near
 - Demo post: the human publishes it and pastes the URL here.
-- Contract: `core.<team>.near` on mainnet, linked on NearBlocks.
+- Contract: `core.meridian-near.testnet` on NEAR testnet, linked on NearBlocks.
 
 ## Demo post
 

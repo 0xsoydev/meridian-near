@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ago, evmTransfer, fundingPercent, paymentUri, percent, sentence, shortAccount, usd } from "./client.ts";
+import { NEAR_ACCOUNT, ago, evmTransfer, fundingPercent, paymentUri, percent, sentence, shortAccount, usd } from "./client.ts";
 
 test("sentence turns router errors into sentences", () => {
   assert.equal(sentence("credential rejected by the rail"), "Credential rejected by the rail.");
@@ -68,4 +68,13 @@ test("shortAccount shortens Ethereum and Solana addresses and leaves NEAR names"
   assert.equal(shortAccount("0x67865d039732e56b9ad1c30972170cdc3e446ec8"), "0x6786…6ec8");
   assert.equal(shortAccount("CQ6NRdpdbjR6PE5g1gETqE4AxFDFqtCWHugM2yPi67BF"), "CQ6N…67BF");
   assert.equal(shortAccount("meridian-e2e.testnet"), "meridian-e2e.testnet");
+});
+
+test("NEAR_ACCOUNT accepts NEAR account ids and refuses everything else", () => {
+  for (const id of ["alice.testnet", "core.meridian-near.testnet", "a1", "0x67865d039732e56b9ad1c30972170cdc3e446ec8", "a95afc69cf9540e3d43be65c781a563a0f1073a8bc7d3a1afe0ddaa85c5cf9c2"]) {
+    assert.ok(NEAR_ACCOUNT.test(id), id);
+  }
+  for (const id of ["", "a", "Alice.testnet", "alice..testnet", ".alice", "alice.", "alice_-bob", "alice testnet", `${"a".repeat(61)}.near`]) {
+    assert.ok(!NEAR_ACCOUNT.test(id), id);
+  }
 });

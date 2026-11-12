@@ -5,6 +5,8 @@ export const KEY_STORAGE = "meridian_key";
 
 export const ETH_ACCOUNT = /^0x[0-9a-f]{40}$/;
 
+export const NEAR_ACCOUNT = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+
 export function shortAccount(id: string): string {
   if (ETH_ACCOUNT.test(id)) return `${id.slice(0, 6)}…${id.slice(-4)}`;
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(id) ? `${id.slice(0, 4)}…${id.slice(-4)}` : id;

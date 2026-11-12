@@ -148,6 +148,8 @@ export type SignedNonce = { nonce: number };
 
 export type SignedResult = { tx: string | null };
 
+export type FaucetResult = { tx: string | null; amount_usd_micro: string };
+
 export type CapSummary = {
   per_day_usd_micro: string;
   used_today_usd_micro: string;

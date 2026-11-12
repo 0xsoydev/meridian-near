@@ -53,6 +53,14 @@ export function relayKey(): KeyPairString {
   return required("NEAR_RELAY_KEY") as KeyPairString;
 }
 
+export function faucetId(): string {
+  return required("NEAR_FAUCET_ID");
+}
+
+export function faucetKey(): KeyPairString {
+  return required("NEAR_FAUCET_KEY") as KeyPairString;
+}
+
 export function keeperId(): string {
   return required("NEAR_OPS_ID");
 }

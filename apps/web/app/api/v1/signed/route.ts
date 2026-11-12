@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { signedBy } from "../../../../lib/auth.ts";
+import { NEAR_ACCOUNT } from "../../../../lib/client.ts";
 import { fail } from "../../../../lib/errors.ts";
-import { call, coreId, opsId, relayKey, view } from "../../../../lib/near.ts";
+import { call, coreId, nearProvider, opsId, relayKey, view } from "../../../../lib/near.ts";
 import { orderText, type Order } from "../../../../lib/orders.ts";
 import { txHashOf } from "../../../../lib/perp-events.ts";
 import type { SignedNonce, SignedResult } from "../../../../lib/types";
@@ -13,7 +14,7 @@ const common = { owner, nonce: z.number().int().nonnegative(), valid_until: z.nu
 
 const orderSchema: z.ZodType<Order> = z.discriminatedUnion("method", [
   z.object({ method: z.literal("set_cap_signed"), key: z.string().min(1).max(64), per_day: micro, ...common }).strict(),
-  z.object({ method: z.literal("withdraw_signed"), amount: micro, to: z.string().min(2).max(64), ...common }).strict(),
+  z.object({ method: z.literal("withdraw_signed"), amount: micro, to: z.string().regex(NEAR_ACCOUNT), ...common }).strict(),
   z.object({ method: z.literal("modify_signed"), model: z.string().min(1).max(64), size_delta: delta, margin_delta: delta, ...common }).strict(),
 ]);
 
@@ -36,6 +37,15 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (!signedBy(order.owner, orderText(coreId(), order), signature)) {
     return fail(401, "invalid_api_key", "the signature doesn't match this account");
+  }
+  if (order.method === "withdraw_signed" && !/^([0-9a-f]{64}|0x[0-9a-f]{40})$/.test(order.to)) {
+    const exists = await nearProvider()
+      .viewAccount({ accountId: order.to })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!exists) return fail(400, "invalid_request", `There is no NEAR account named ${order.to}.`);
   }
   if ((await view<number>("nonce_of", { owner: order.owner })) !== order.nonce) {
     return fail(409, "invalid_request", "this signature was already used; sign again");
