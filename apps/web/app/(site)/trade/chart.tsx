@@ -5,13 +5,10 @@ import {
   CandlestickSeries,
   CrosshairMode,
   HistogramSeries,
-  LineSeries,
   LineStyle,
-  LineType,
   createChart,
   type IChartApi,
   type ISeriesApi,
-  type UTCTimestamp,
 } from "lightweight-charts";
 import { FOCUS } from "../../../components/kit";
 import { candlesFromPoints, type CandlePoint, type ChartPoint } from "../../../lib/price";
@@ -25,23 +22,12 @@ export const INTERVALS = [
 
 export type Interval = (typeof INTERVALS)[number]["value"];
 
-const SPARSE = 6;
 const BAR = "rgba(23, 67, 255, 0.22)";
 
 const ohlc = ({ time, open, high, low, close }: CandlePoint) => ({ time, open, high, low, close });
 
 function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function steps(points: ReadonlyArray<ChartPoint>): { time: UTCTimestamp; value: number }[] {
-  const out: { time: UTCTimestamp; value: number }[] = [];
-  for (const point of points) {
-    const last = out.at(-1);
-    if (last && last.time === point.time) last.value = point.value;
-    else out.push({ time: point.time, value: point.value });
-  }
-  return out;
 }
 
 export function ChartCredit() {
@@ -57,7 +43,7 @@ export function ChartCredit() {
   );
 }
 
-type Drawn = { chart: IChartApi; candles: ISeriesApi<"Candlestick">; line: ISeriesApi<"Line">; volume: ISeriesApi<"Histogram"> };
+type Drawn = { chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram"> };
 
 export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; bucket: number; empty: string }) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -103,17 +89,6 @@ export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; b
       priceLineWidth: 1,
       priceFormat,
     });
-    const stepped = chart.addSeries(LineSeries, {
-      color: ink,
-      lineWidth: 2,
-      lineType: LineType.WithSteps,
-      pointMarkersVisible: true,
-      pointMarkersRadius: 3,
-      priceLineColor: accent,
-      priceLineStyle: LineStyle.Dashed,
-      priceLineWidth: 1,
-      priceFormat,
-    });
     const volume = chart.addSeries(HistogramSeries, {
       priceScaleId: "",
       priceFormat: { type: "volume" },
@@ -121,7 +96,7 @@ export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; b
       priceLineVisible: false,
     });
     chart.priceScale("").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    drawn.current = { chart, candles, line: stepped, volume };
+    drawn.current = { chart, candles, volume };
     signature.current = "";
     return () => {
       chart.remove();
@@ -137,21 +112,9 @@ export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; b
     if (key === signature.current) return;
     signature.current = key;
     const candles = candlesFromPoints(points, bucket);
-    const sparse = candles.length < SPARSE;
     current.chart.applyOptions({ rightPriceScale: { visible: points.length > 0 }, timeScale: { visible: points.length > 0 } });
-    current.candles.applyOptions({ visible: !sparse });
-    current.volume.applyOptions({ visible: !sparse });
-    current.line.applyOptions({ visible: sparse });
-    if (sparse) {
-      current.candles.setData([]);
-      current.volume.setData([]);
-      current.line.setData(steps(points));
-      current.chart.timeScale().fitContent();
-    } else {
-      current.line.setData([]);
-      current.candles.setData(candles.map(ohlc));
-      current.volume.setData(candles.map((candle) => ({ time: candle.time, value: candle.volume, color: candle.volume > 0 ? BAR : "transparent" })));
-    }
+    current.candles.setData(candles.map(ohlc));
+    current.volume.setData(candles.map((candle) => ({ time: candle.time, value: candle.volume, color: candle.volume > 0 ? BAR : "transparent" })));
   }, [points, bucket]);
 
   return (
