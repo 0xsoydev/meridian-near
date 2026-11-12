@@ -264,6 +264,7 @@ export const intentQuoteSchema: z.ZodType<IntentQuote> = z.object({
 export const returnedSchema = z.object({ returned_usd_micro: int });
 export const signedNonceSchema = z.object({ nonce: z.number().int().nonnegative() });
 export const signedResultSchema = z.object({ tx: z.string().nullable() });
+export const faucetSchema = z.object({ tx: z.string().nullable(), amount_usd_micro: int });
 export const intentStatusSchema = z.object({ status: intentStatus });
 
 export const listingsSchema: z.ZodType<SellerListings> = z.object({
