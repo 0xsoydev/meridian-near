@@ -9,4 +9,5 @@ jobs:
   tick:
     runs-on: ubuntu-latest
     steps:
-      - run: curl -fsS -H "authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ vars.MERIDIAN_URL }}/api/v1/tick"
+      - run: |
+          curl -fsS -H "authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ vars.MERIDIAN_URL }}/api/v1/tick"
