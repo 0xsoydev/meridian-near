@@ -24,12 +24,13 @@ import {
   Table,
   Toggle,
 } from "../../../components/kit";
-import { CHAINS, KEY_STORAGE, api, chainName, evmTransfer, explorer, paymentUri, railName, usd } from "../../../lib/client";
+import { CHAINS, KEY_STORAGE, NEAR_ACCOUNT, api, chainName, evmTransfer, explorer, paymentUri, railName, usd } from "../../../lib/client";
 import { formatMicroPerMtok, formatMtok, parseUsd, stampFormat } from "../../../lib/price";
 import type { CreateKeyResult, IntentQuote, IntentStatus, IntentToken, KeySummary, OwnerUsage, VenueStatus } from "../../../lib/types";
 import {
   anything,
   createKeySchema,
+  faucetSchema,
   intentQuoteSchema,
   intentStatusSchema,
   intentTokensSchema,
@@ -67,9 +68,13 @@ function rank(code: string): number {
 }
 
 const STEPS = [
-  ["Deposit", "USDC from your NEAR account, or any token from another chain through NEAR Intents."],
+  MAINNET
+    ? ["Deposit", "USDC from your NEAR account, or any token from another chain through NEAR Intents."]
+    : ["Deposit", "Test USDC from the faucet, or USDC from your NEAR testnet account."],
   ["Give each agent a key", "Every key gets a daily limit that the contract enforces, so an agent can't overspend."],
-  ["Withdraw any time", "Back to your NEAR account or another chain. A revoked key's balance returns in the next payout."],
+  MAINNET
+    ? ["Withdraw any time", "Back to your NEAR account or another chain. A revoked key's balance returns in the next payout."]
+    : ["Withdraw any time", "To any NEAR testnet account. A revoked key's balance returns in the next payout."],
 ] as const;
 
 function call(receiverId: string, methodName: string, args: object, gas: string, deposit: string): NearTransaction {
@@ -172,6 +177,7 @@ export default function WalletPage() {
 
   useEffect(() => {
     setAsked(new URLSearchParams(window.location.search).get("key"));
+    if (!MAINNET) return;
     void api("/api/v1/quotes/tokens", intentTokensSchema).then((result) => {
       if (!result.ok) return;
       const external = result.data.data.filter((token) => token.blockchain !== "near");
@@ -180,7 +186,7 @@ export default function WalletPage() {
   }, []);
 
   useEffect(() => {
-    if (!viaNear) setRoute("chain");
+    if (!viaNear && MAINNET) setRoute("chain");
   }, [viaNear]);
 
   useEffect(() => {
@@ -312,6 +318,10 @@ export default function WalletPage() {
       return flagMoney(`Your NEAR account holds ${usd(balances.near)} USDC.`, "amount");
     }
     if (direction === "withdraw" && balances && micro > balances.wallet) return flagMoney(`Your wallet holds ${usd(balances.wallet)}.`, "amount");
+    const to = viaNear ? null : address.trim();
+    if (direction === "withdraw" && to !== null && !NEAR_ACCOUNT.test(to)) {
+      return flagMoney(`Enter the NEAR account to send to, like ${MAINNET ? "alice.near" : "alice.testnet"}.`, "address");
+    }
     const before = balances?.wallet ?? null;
     if (direction === "deposit") {
       const hashes = await transact(
@@ -330,13 +340,32 @@ export default function WalletPage() {
     const hashes = await transact(
       "move",
       [
-        call(USDC, "storage_deposit", { account_id: accountId, registration_only: true }, "30000000000000", STORAGE_DEPOSIT),
-        call(CORE, "withdraw", { amount: micro.toString(), to: null }, "50000000000000", "1"),
+        call(USDC, "storage_deposit", { account_id: to ?? accountId, registration_only: true }, "30000000000000", STORAGE_DEPOSIT),
+        call(CORE, "withdraw", { amount: micro.toString(), to }, "50000000000000", "1"),
       ],
-      `Sent ${usd(micro)} to ${accountId}.`,
+      `Sent ${usd(micro)} to ${to ?? accountId}.`,
       setMoney,
     );
     if (hashes) await readWallet();
+  };
+
+  const claimFaucet = async () => {
+    setMoney(null);
+    setBusy("faucet");
+    const signed = await sign("faucet");
+    if (!signed) {
+      setBusy(null);
+      setMoney({ tone: "down", text: "The wallet didn't sign, so no test USDC was sent." });
+      return;
+    }
+    const result = await api("/api/v1/faucet", faucetSchema, { method: "POST", body: JSON.stringify(signed) });
+    setBusy(null);
+    if (!result.ok) {
+      setMoney({ tone: "down", text: result.message });
+      return;
+    }
+    setMoney({ tone: "up", text: `Added ${usd(BigInt(result.data.amount_usd_micro))} test USDC to your wallet.`, tx: result.data.tx });
+    await readWallet();
   };
 
   const quoteChain = async () => {
@@ -605,6 +634,19 @@ export default function WalletPage() {
   }
 
   const chainVerb = direction === "deposit" ? "Get a deposit address" : "Get a quote";
+  const testnetDeposit = !MAINNET && direction === "deposit";
+  const nearForm = route === "near" && (!testnetDeposit || (viaNear && (balances?.near ?? 0n) > 0n));
+  const faucetLabel = busy === "faucet" ? "Waiting for the wallet" : "Get 10 test USDC";
+  const footnote =
+    route === "chain"
+      ? "Routed by NEAR Intents 1Click. A quote holds for a few minutes."
+      : direction === "deposit"
+        ? nearForm
+          ? "Moves USDC from your NEAR account into Meridian."
+          : null
+        : viaNear
+          ? "If your account has never held USDC, the wallet also pays 0.00125 NEAR to register it."
+          : "Meridian pays the network fee and registers the account for USDC if it needs it.";
   const most = balances ? (direction === "deposit" ? balances.near : balances.wallet) : null;
   const token = tokens.find((item) => item.assetId === asset) ?? null;
   const chain = token ? chainName(token.blockchain) : "that chain";
@@ -651,7 +693,7 @@ export default function WalletPage() {
               { value: "withdraw", label: "Withdraw" },
             ]}
           />
-          {viaNear ? (
+          {viaNear && MAINNET ? (
             <Toggle
               label="Route"
               value={route}
@@ -687,6 +729,23 @@ export default function WalletPage() {
               </Field>
             )
           ) : null}
+          {testnetDeposit ? (
+            <div className="flex flex-col items-start gap-2">
+              {nearForm ? (
+                <button type="button" disabled={busy !== null} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()} className={SECONDARY}>
+                  {faucetLabel}
+                </button>
+              ) : (
+                <CommitButton disabled={busy !== null} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()}>
+                  {faucetLabel}
+                </CommitButton>
+              )}
+              <p className="text-pretty text-[13px] leading-[20px] text-muted">
+                This demo runs on NEAR testnet. The faucet tops up wallets holding under $1.00; deposits from other chains run on mainnet.
+              </p>
+            </div>
+          ) : null}
+          {route === "chain" || nearForm ? (
           <Field
             label="Amount (USDC)"
             note={
@@ -714,6 +773,19 @@ export default function WalletPage() {
               ) : null}
             </div>
           </Field>
+          ) : null}
+          {nearForm && direction === "withdraw" && !viaNear ? (
+            <Field label="Send to (NEAR account)" note={`Like ${MAINNET ? "alice.near" : "alice.testnet"}. Double-check it: transfers can't be reversed.`}>
+              <input
+                ref={addressRef}
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className={`${INPUT} font-mono text-[13px]`}
+              />
+            </Field>
+          ) : null}
           {route === "chain" && direction === "deposit" && quote === null && token ? (
             <p role="status" className={`text-[13px] leading-[20px] ${shown === null ? "text-muted" : "error" in shown ? "text-down" : "text-ink"}`}>
               {shown === null
@@ -743,16 +815,13 @@ export default function WalletPage() {
               />
             </Field>
           ) : null}
-          {route === "chain" && !MAINNET ? (
-            <p className="border-l-2 border-accent pl-3 text-[13px] leading-[20px] text-ink">
-              Testnet shows prices only. {direction === "deposit" ? "Deposits from" : "Withdrawals to"} other chains run on mainnet.
-            </p>
-          ) : null}
 
           {route === "near" ? (
-            <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void moveOnNear()} className="self-start">
-              {busy === "move" ? "Waiting for the wallet" : `${direction === "deposit" ? "Deposit" : "Withdraw"} ${amount || "0"} USDC`}
-            </CommitButton>
+            nearForm ? (
+              <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void moveOnNear()} className="self-start">
+                {busy === "move" ? "Waiting for the wallet" : `${direction === "deposit" ? "Deposit" : "Withdraw"} ${amount || "0"} USDC`}
+              </CommitButton>
+            ) : null
           ) : quote === null ? (
             <div className="flex flex-wrap gap-2">
               {payable
@@ -853,13 +922,7 @@ export default function WalletPage() {
             </div>
           )}
           <Said notice={money} />
-          <p className="text-[12px] leading-[18px] text-muted">
-            {route === "chain"
-              ? "Routed by NEAR Intents 1Click. A quote holds for a few minutes."
-              : direction === "deposit"
-                ? "Moves USDC from your NEAR account into Meridian."
-                : "If your account has never held USDC, the wallet also pays 0.00125 NEAR to register it."}
-          </p>
+          {footnote ? <p className="text-[12px] leading-[18px] text-muted">{footnote}</p> : null}
         </Panel>
 
         <Panel
