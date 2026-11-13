@@ -185,6 +185,13 @@ export function fillsToPoints(fills: BookFill[], sinceMs = Number.NEGATIVE_INFIN
     }));
 }
 
+export function dayChange(points: ReadonlyArray<ChartPoint>, nowS: number): number | null {
+  const day = points.filter((point) => point.time >= nowS - 86_400);
+  const first = day[0]?.value;
+  const last = day.at(-1)?.value;
+  return day.length > 1 && first && last !== undefined ? ((last - first) / first) * 100 : null;
+}
+
 export function postsToPoints(posts: ReadonlyArray<{ price_micro_per_mtok: string; at: number }>): ChartPoint[] {
   return posts.map((post) => ({ time: post.at as UTCTimestamp, value: Number(post.price_micro_per_mtok) / 1e6, volume: 0 }));
 }

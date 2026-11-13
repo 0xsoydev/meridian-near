@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CandlestickSeries,
   CrosshairMode,
   HistogramSeries,
   LineStyle,
   createChart,
+  type AutoscaleInfoProvider,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
 } from "lightweight-charts";
 import { FOCUS } from "../../../components/kit";
@@ -45,10 +47,30 @@ export function ChartCredit() {
 
 type Drawn = { chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram"> };
 
-export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; bucket: number; empty: string }) {
+export type Level = { price: bigint; title: string; tone: "muted" | "up" | "down" };
+
+type Legend = { open: number; high: number; low: number; close: number; volume: number };
+
+export function CandleChart({
+  points,
+  bucket,
+  empty,
+  precision = 4,
+  levels = [],
+}: {
+  points: ChartPoint[];
+  bucket: number;
+  empty: string;
+  precision?: number;
+  levels?: ReadonlyArray<Level>;
+}) {
   const host = useRef<HTMLDivElement | null>(null);
   const drawn = useRef<Drawn | null>(null);
   const signature = useRef("");
+  const marks = useRef<number[]>([]);
+  const lines = useRef<IPriceLine[]>([]);
+  const [legend, setLegend] = useState<Legend | null>(null);
+  const [hovered, setHovered] = useState<Legend | null>(null);
 
   useEffect(() => {
     const el = host.current;
@@ -70,7 +92,7 @@ export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; b
         attributionLogo: false,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: "rgba(30, 30, 30, 0.06)" } },
-      rightPriceScale: { borderColor: line, scaleMargins: { top: 0.12, bottom: 0.24 } },
+      rightPriceScale: { borderColor: line, scaleMargins: { top: 0.12, bottom: 0.24 }, tickMarkDensity: 4, entireTextOnly: true },
       timeScale: { borderColor: line, timeVisible: true, secondsVisible: false, rightOffset: 6, barSpacing: 10 },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -87,7 +109,17 @@ export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; b
       priceLineColor: accent,
       priceLineStyle: LineStyle.Dashed,
       priceLineWidth: 1,
+      lastValueVisible: false,
       priceFormat,
+      autoscaleInfoProvider: ((base) => {
+        const info = base();
+        if (!info?.priceRange) return info;
+        const minValue = Math.min(info.priceRange.minValue, ...marks.current);
+        const maxValue = Math.max(info.priceRange.maxValue, ...marks.current);
+        const mid = (minValue + maxValue) / 2;
+        const half = Math.max((maxValue - minValue) / 2, mid * 0.02);
+        return { ...info, priceRange: { minValue: mid - half, maxValue: mid + half } };
+      }) satisfies AutoscaleInfoProvider,
     });
     const volume = chart.addSeries(HistogramSeries, {
       priceScaleId: "",
@@ -96,6 +128,15 @@ export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; b
       priceLineVisible: false,
     });
     chart.priceScale("").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    chart.subscribeCrosshairMove((param) => {
+      const bar = param.seriesData.get(candles);
+      const traded = param.seriesData.get(volume);
+      setHovered(
+        bar && "open" in bar
+          ? { open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: traded && "value" in traded ? traded.value : 0 }
+          : null,
+      );
+    });
     drawn.current = { chart, candles, volume };
     signature.current = "";
     return () => {
@@ -108,18 +149,55 @@ export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; b
     const current = drawn.current;
     if (!current) return;
     const last = points.at(-1);
-    const key = `${bucket}:${points.length}:${points[0]?.time ?? 0}:${last?.time ?? 0}:${last?.value ?? 0}`;
+    const drawnLevels = levels.map((level) => `${level.title}:${level.price}:${level.tone}`).join("|");
+    const key = `${bucket}:${precision}:${points.length}:${points[0]?.time ?? 0}:${last?.time ?? 0}:${last?.value ?? 0}:${drawnLevels}`;
     if (key === signature.current) return;
     signature.current = key;
+    for (const line of lines.current) current.candles.removePriceLine(line);
+    marks.current = levels.map((level) => Number(level.price) / 1e6);
+    lines.current = levels.map((level) =>
+      current.candles.createPriceLine({
+        price: Number(level.price) / 1e6,
+        color: token(`--color-${level.tone}`),
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: false,
+      }),
+    );
+    current.candles.applyOptions({ priceFormat: { type: "price", precision, minMove: 10 ** -precision } });
+    current.chart.applyOptions({ localization: { priceFormatter: (value: number) => value.toFixed(precision).replace(/(\.\d{4}\d*?)0+$/, "$1") } });
     const candles = candlesFromPoints(points, bucket);
+    const final = candles.at(-1);
+    setLegend(final ? { open: final.open, high: final.high, low: final.low, close: final.close, volume: final.volume } : null);
     current.chart.applyOptions({ rightPriceScale: { visible: points.length > 0 }, timeScale: { visible: points.length > 0 } });
     current.candles.setData(candles.map(ohlc));
-    current.volume.setData(candles.map((candle) => ({ time: candle.time, value: candle.volume, color: candle.volume > 0 ? BAR : "transparent" })));
-  }, [points, bucket]);
+    current.volume.setData(candles.map((candle) => ({ time: candle.time, value: candle.volume, color: candle.volume > 0 && candles.length >= 5 ? BAR : "transparent" })));
+    if (candles.length > 40) current.chart.timeScale().fitContent();
+  }, [points, bucket, levels, precision]);
 
+  const shown = hovered ?? legend;
   return (
     <div className="relative h-full min-h-[280px] w-full">
       <div ref={host} className="absolute inset-0" />
+      {shown && points.length > 0 ? (
+        <p aria-hidden className="pointer-events-none absolute left-4 top-3 z-10 flex gap-3 text-[12px] tabular-nums text-muted">
+          {(["open", "high", "low", "close"] as const).map((part) => (
+            <span key={part}>
+              {part[0]?.toUpperCase()} <span className="text-ink">{shown[part].toFixed(precision)}</span>
+            </span>
+          ))}
+          {shown.volume > 0 ? (
+            <span>
+              Vol <span className="text-ink">{shown.volume.toFixed(3).replace(/\.?0+$/, "")} MTok</span>
+            </span>
+          ) : null}
+          {levels.map((level) => (
+            <span key={level.title} className={level.tone === "down" ? "text-down" : level.tone === "up" ? "text-up" : undefined}>
+              {level.title} <span className={level.tone === "muted" ? "text-ink" : undefined}>{(Number(level.price) / 1e6).toFixed(precision)}</span>
+            </span>
+          ))}
+        </p>
+      ) : null}
       {points.length === 0 ? (
         <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[13px] text-muted">{empty}</p>
       ) : null}

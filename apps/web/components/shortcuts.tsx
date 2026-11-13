@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Keyboard, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { FOCUS, ICON, Kbd } from "./kit";
 
@@ -41,12 +41,12 @@ export function Shortcuts({ items }: { items: ReadonlyArray<Shortcut> }) {
     <>
       <button
         type="button"
-        aria-label="Keyboard shortcuts"
         aria-keyshortcuts="?"
         onClick={() => dialog.current?.showModal()}
-        className={`hidden h-8 w-8 items-center justify-center border border-line text-[13px] text-muted transition-colors duration-150 ease-brand hover:bg-hover hover:text-ink lg:inline-flex ${FOCUS}`}
+        className={`hidden h-8 items-center gap-1.5 px-2 text-[13px] text-muted transition-colors duration-150 ease-brand hover:bg-hover hover:text-ink lg:inline-flex ${FOCUS}`}
       >
-        ?
+        <Keyboard aria-hidden className="size-4" />
+        Shortcuts
       </button>
       <dialog
         ref={dialog}

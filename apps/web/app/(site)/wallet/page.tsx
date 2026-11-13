@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { z } from "zod";
 import { ConfirmButton } from "../../../components/confirm-button";
 import { CopyButton } from "../../../components/copy-button";
+import { AgentPrompt } from "../../../components/landing/agents-terminal";
 import {
   CommitButton,
   Empty,
@@ -18,6 +19,7 @@ import {
   Panel,
   ROW,
   SECONDARY,
+  Segmented,
   Select,
   Skeleton,
   TD,
@@ -637,6 +639,7 @@ export default function WalletPage() {
   const testnetDeposit = !MAINNET && direction === "deposit";
   const nearForm = route === "near" && (!testnetDeposit || (viaNear && (balances?.near ?? 0n) > 0n));
   const faucetLabel = busy === "faucet" ? "Waiting for the wallet" : "Get 10 test USDC";
+  const funded = balances !== null && balances.wallet >= 1_000_000n;
   const footnote =
     route === "chain"
       ? "Routed by NEAR Intents 1Click. A quote holds for a few minutes."
@@ -667,7 +670,7 @@ export default function WalletPage() {
         )}
         <p className="text-[14px] leading-[22px] text-muted">
           USDC on {CORE || "core"}, held for{" "}
-          <a href={explorer("address", accountId)} target="_blank" rel="noreferrer" className={`${LINK} break-all text-ink`}>
+          <a href={explorer("address", accountId)} target="_blank" rel="noreferrer" className={`${LINK} text-ink [overflow-wrap:anywhere]`}>
             {own ?? accountId}
           </a>
           {balances && balances.near > 0n ? (
@@ -680,8 +683,7 @@ export default function WalletPage() {
 
       <div className="grid gap-12 lg:grid-cols-[400px_minmax(0,1fr)]">
         <Panel title="Move money" bodyClassName="flex flex-col gap-5 pt-5">
-          <Toggle
-            big
+          <Segmented
             label="Direction"
             value={direction}
             onChange={(next) => {
@@ -729,17 +731,11 @@ export default function WalletPage() {
               </Field>
             )
           ) : null}
-          {testnetDeposit ? (
+          {testnetDeposit && !nearForm ? (
             <div className="flex flex-col items-start gap-2">
-              {nearForm ? (
-                <button type="button" disabled={busy !== null} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()} className={SECONDARY}>
-                  {faucetLabel}
-                </button>
-              ) : (
-                <CommitButton disabled={busy !== null} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()}>
-                  {faucetLabel}
-                </CommitButton>
-              )}
+              <CommitButton disabled={busy !== null || funded} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()}>
+                {faucetLabel}
+              </CommitButton>
               <p className="text-pretty text-[13px] leading-[20px] text-muted">
                 This demo runs on NEAR testnet. The faucet tops up wallets holding under $1.00; deposits from other chains run on mainnet.
               </p>
@@ -818,7 +814,7 @@ export default function WalletPage() {
 
           {route === "near" ? (
             nearForm ? (
-              <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void moveOnNear()} className="self-start">
+              <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void moveOnNear()} className="w-full sm:w-auto sm:self-start">
                 {busy === "move" ? "Waiting for the wallet" : `${direction === "deposit" ? "Deposit" : "Withdraw"} ${amount || "0"} USDC`}
               </CommitButton>
             ) : null
@@ -912,7 +908,7 @@ export default function WalletPage() {
                   {statusText(quoteStatus, direction, chain, false)}
                 </p>
               ) : quote.depositAddress ? (
-                <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void sendChainWithdraw()} className="self-start">
+                <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void sendChainWithdraw()} className="w-full sm:w-auto sm:self-start">
                   {busy === "move" ? "Waiting for the wallet" : `Withdraw ${amount} USDC as ${token?.symbol ?? "it"} on ${chain}`}
                 </CommitButton>
               ) : null}
@@ -922,7 +918,21 @@ export default function WalletPage() {
             </div>
           )}
           <Said notice={money} />
-          {footnote ? <p className="text-[12px] leading-[18px] text-muted">{footnote}</p> : null}
+          {footnote ? <p className="text-[13px] leading-[19px] text-muted">{footnote}</p> : null}
+          {testnetDeposit && nearForm ? (
+            <p className="text-pretty text-[13px] leading-[19px] text-muted">
+              {funded && balances ? (
+                `Test USDC comes from a faucet that tops up wallets under $1.00, and yours holds ${usd(balances.wallet)}.`
+              ) : (
+                <>
+                  Need test USDC?{" "}
+                  <button type="button" disabled={busy !== null} onClick={() => void claimFaucet()} className={`${LINK} text-ink`}>
+                    {busy === "faucet" ? "Waiting for the wallet" : "Get 10 from the faucet"}
+                  </button>
+                </>
+              )}
+            </p>
+          ) : null}
         </Panel>
 
         <Panel
@@ -988,7 +998,10 @@ export default function WalletPage() {
                 : "Sign once to see your agents and what they spent. It proves this wallet owns them, and nothing goes on chain."}
             </Empty>
           ) : keys.length === 0 ? (
-            <Empty start>No agents yet. Create a key, then give it to an agent with a daily limit.</Empty>
+            <div className="flex flex-col gap-5">
+              <Empty start>No agents yet. Create a key here, or let your coding agent ask for one and approve it on your phone.</Empty>
+              <AgentPrompt host={window.location.origin} />
+            </div>
           ) : (
             <div role="list" aria-label="Agents" className="flex flex-col">
               <div

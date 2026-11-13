@@ -1,30 +1,31 @@
 "use client";
 
-import { Minus, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Activity, ArrowLeftRight, ChartCandlestick, Minus, Plus, Wallet } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CHIP,
   CommitButton,
   Empty,
-  FOCUS,
-  Field,
   ICON,
-  INPUT,
   INPUT_SM,
   LINK,
   Line,
+  NIL,
+  Pair,
   MarketSelect,
   MobileTabs,
   Panel,
   ROW,
   SECONDARY,
+  SMALL,
+  Segmented,
   Stat,
   TD,
   Table,
   Toggle,
 } from "../../../components/kit";
 import { Shortcuts } from "../../../components/shortcuts";
-import { ago, api, explorer, fundingPercent, percent, usd } from "../../../lib/client";
+import { Amount, Portion } from "../../../components/ticket";
+import { ago, amount, api, explorer, fixed, fundingPercent, percent, places, price as fmtPrice, usd } from "../../../lib/client";
 import { runs } from "../../../lib/index-math";
 import { MARKETS } from "../../../lib/markets";
 import {
@@ -39,7 +40,7 @@ import {
   type HistoryAction,
   type PositionMath,
 } from "../../../lib/perp-math";
-import { clockFormat, formatMtok, parseMtok, parseUsd, postsToPoints, stampFormat } from "../../../lib/price";
+import { clockFormat, dayChange, formatMtok, parseMtok, parseUsd, postsToPoints, stampFormat } from "../../../lib/price";
 import type { PerpAccount, PerpEvent, PerpMarket, VenueStatus } from "../../../lib/types";
 import { perpAccountSchema, perpHistorySchema, perpMarketSchema, statusSchema } from "../../../lib/wire";
 import { useNear } from "../providers";
@@ -49,7 +50,6 @@ const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
 const POLL_MS = 15_000;
 const STALE_S = 600;
 const MOVES = [-2000n, -1000n, -500n, 500n, 1000n, 2000n] as const;
-const PRESETS = [25n, 50n, 75n, 100n] as const;
 
 type Side = "long" | "short";
 type Leg = { sizeDelta: bigint; margin: bigint };
@@ -65,7 +65,7 @@ function sizeText(tokens: bigint): string {
 }
 
 function describe(size: bigint): string {
-  return size === 0n ? "None" : `${formatMtok(abs(size))} MTok ${size > 0n ? "long" : "short"}`;
+  return size === 0n ? "Flat" : `${formatMtok(abs(size))} MTok ${size > 0n ? "long" : "short"}`;
 }
 
 const ACTIONS: Record<HistoryAction, string> = {
@@ -191,9 +191,13 @@ export default function PerpsPage() {
   const maxOi = market ? BigInt(market.max_oi) : 0n;
   const totalOi = longOi + shortOi;
   const funding = market ? BigInt(market.funding_rate_per_hour) : 0n;
+  const digits = places(price);
+  const at = (micro: bigint) => fmtPrice(micro, digits);
   const points = useMemo(() => postsToPoints(market?.posts ?? []), [market]);
+  const change = dayChange(points, now);
   const postRuns = useMemo(() => runs(market?.posts ?? []).toReversed(), [market]);
   const rows = useMemo(() => historyRows(history ?? []), [history]);
+  const postPrices = postRuns.map((run) => at(run.price));
 
   const position = account?.positions.find((entry) => entry.model === model) ?? null;
   const held = position ? BigInt(position.size) : 0n;
@@ -208,13 +212,20 @@ export default function PerpsPage() {
   const ladderFor = tokens > 0n ? after : position ? math(position) : null;
   const ladder = ladderFor && price > 0n ? payoffLadder(ladderFor, price, MOVES) : [];
   const ladderLiquidation = ladderFor ? liquidationPrice(ladderFor) : 0n;
+  const ladderIndex = ladder.map((step) => at(step.price));
+  const ladderPnl = ladder.map((step) => `${step.pnl > 0n ? "+" : ""}${fixed(step.pnl, 4)}`);
+  const ladderEquity = [
+    ...ladder.map((step) => (step.liquidated ? "Liquidated" : fixed(step.equity, 4))),
+    ladderLiquidation === 0n ? "Never" : at(ladderLiquidation),
+  ];
   const opposite = held !== 0n && held > 0n !== (side === "long");
   const max = wallet !== null && price > 0n ? maxOpen(wallet, price, BigInt(chosen)) + (opposite ? abs(held) : 0n) : 0n;
   const share = max > 0n ? Number((tokens * 100n) / max > 100n ? 100n : (tokens * 100n) / max) : 0;
-  const sizeFill: CSSProperties & Record<"--fill", string> = { "--fill": `${share}%` };
-  const leverageFill: CSSProperties & Record<"--fill", string> = {
-    "--fill": `${maxLeverage > 1 ? ((chosen - 1) / (maxLeverage - 1)) * 100 : 100}%`,
-  };
+  const inPositions = (account?.positions ?? []).reduce((total, entry) => total + BigInt(entry.margin_usd_micro), 0n);
+  const unrealized = (account?.positions ?? []).reduce(
+    (total, entry) => total + BigInt(entry.equity_usd_micro) - BigInt(entry.margin_usd_micro) + BigInt(entry.funding_owed_usd_micro),
+    0n,
+  );
   const marks = new Map((status?.markets ?? []).map((entry) => [entry.model, entry.index_micro_per_mtok]));
   const leverages = Array.from({ length: Math.min(maxLeverage, 5) }, (_, step) => (maxLeverage <= 5 ? step + 1 : [1, 2, 3, 5, maxLeverage][step] ?? 1));
 
@@ -326,18 +337,38 @@ export default function PerpsPage() {
     </div>
   );
 
+  const costs = (
+    <dl className="flex flex-col gap-1.5">
+      <Line label="Entry price">{price > 0n ? at(price) : "No index"}</Line>
+      <Line label="Notional">{amount(notional(delta, price))}</Line>
+      <Line label="Margin with buffer and fee">{amount(margin)}</Line>
+      <Line label="Fee (0.1%)">{amount(fees)}</Line>
+    </dl>
+  );
+  const outcome = (
+    <dl className="flex flex-col gap-1.5">
+      <Line label="Liquidation price">{liquidation === null || liquidation === 0n ? NIL : at(liquidation)}</Line>
+      <Line label="Position after">{after ? describe(after.size) : "Flat"}</Line>
+    </dl>
+  );
+
   return (
     <div className="flex flex-col pb-[52px] lg:pb-0">
       <h1 className="sr-only">Perps on {model || "the index"}</h1>
       <div className="flex flex-col gap-3 border-b border-line px-4 py-3 lg:h-16 lg:flex-row lg:items-center lg:gap-10 lg:px-6 lg:py-0">
         <MarketSelect value={model} onChange={(next) => setModel(next)} groups={[{ label: "Perps", models: MARKETS }]} />
         <dl className="grid min-w-0 grid-cols-3 gap-x-4 gap-y-2 lg:flex lg:gap-8 lg:overflow-x-auto">
-          <Stat label="Index">{price > 0n ? usd(price) : "Not posted"}</Stat>
+          <Stat label="Index" big>
+            {price > 0n ? at(price) : "Not posted"}
+          </Stat>
+          <Stat label="24h change" tone={change === null || change === 0 ? undefined : change > 0 ? "up" : "down"}>
+            {change === null ? NIL : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
+          </Stat>
           <Stat label="Funding (1h)" tone={funding > 0n ? "down" : funding < 0n ? "up" : undefined}>
             {fundingPercent(funding)}
           </Stat>
           <Stat label="Open interest">{formatMtok(totalOi)} MTok</Stat>
-          <Stat label="Max leverage">{maxLeverage}x</Stat>
+          <Stat label="Max leverage" className="max-lg:hidden">{maxLeverage}x</Stat>
           <Stat label="Index updated">{age === null ? "Never" : ago(age)}</Stat>
           <Stat label="Trading" tone={open ? "up" : "down"}>
             {open ? "Open" : "Paused"}
@@ -348,7 +379,7 @@ export default function PerpsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:h-[max(600px,calc(100svh_-_260px))] lg:grid-cols-[minmax(0,1fr)_256px_280px] xl:grid-cols-[minmax(0,1fr)_300px_300px]">
+      <div className="grid grid-cols-1 lg:h-[max(640px,calc(100svh_-_157px))] lg:grid-cols-[minmax(0,1fr)_256px_280px] lg:grid-rows-[minmax(0,1fr)_240px] xl:grid-cols-[minmax(0,1fr)_300px_300px]">
         <section
           aria-label="Index chart"
           className={`${panel === "chart" ? "flex" : "hidden"} h-[calc(100svh-17rem)] min-h-[360px] flex-col lg:flex lg:h-auto lg:min-h-0 lg:border-r lg:border-line`}
@@ -361,7 +392,13 @@ export default function PerpsPage() {
             </div>
           </div>
           <div className="min-h-0 flex-1">
-            <CandleChart points={points} bucket={Number(bucket)} empty="No index posts yet. The keeper posts once this model trades." />
+            <CandleChart
+              points={points}
+              bucket={Number(bucket)}
+              precision={digits}
+              empty="No index posts yet. The keeper posts once this model trades."
+              levels={tokens > 0n && liquidation !== null && liquidation > 0n ? [{ price: liquidation, title: "Liq.", tone: "down" }] : []}
+            />
           </div>
         </section>
 
@@ -387,20 +424,20 @@ export default function PerpsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ladder.map((step) => (
+                  {ladder.map((step, row) => (
                     <tr key={step.move.toString()} className="h-6">
                       <td className="px-4 text-ink">
-                        {usd(step.price)} <span className="text-muted">{`${step.move > 0n ? "+" : ""}${Number(step.move) / 100}%`}</span>
+                        {ladderIndex[row]} <span className="text-muted">{`${step.move > 0n ? "+" : ""}${Number(step.move) / 100}%`}</span>
                       </td>
-                      <td className={`text-right ${step.pnl > 0n ? "text-up" : step.pnl < 0n ? "text-down" : "text-ink"}`}>{signed(step.pnl)}</td>
-                      <td className={`px-4 text-right ${step.liquidated ? "text-down" : "text-ink"}`}>{step.liquidated ? "Liquidated" : usd(step.equity)}</td>
+                      <td className={`text-right ${step.pnl > 0n ? "text-up" : step.pnl < 0n ? "text-down" : "text-ink"}`}>{ladderPnl[row]}</td>
+                      <td className={`px-4 text-right ${step.liquidated ? "text-down" : "text-ink"}`}>{ladderEquity[row]}</td>
                     </tr>
                   ))}
                   <tr className="h-7 border-t border-line">
                     <td className="px-4 text-muted" colSpan={2}>
                       Liquidates at
                     </td>
-                    <td className="px-4 text-right text-down">{ladderLiquidation === 0n ? "Never" : usd(ladderLiquidation)}</td>
+                    <td className="px-4 text-right text-down">{ladderEquity[ladder.length]}</td>
                   </tr>
                 </tbody>
               </table>
@@ -420,11 +457,11 @@ export default function PerpsPage() {
               <Line label="Short" tone="down">
                 {formatMtok(shortOi)} MTok
               </Line>
-              <Line label="Cap per side">{maxOi > 0n ? `${formatMtok(maxOi)} MTok` : "None"}</Line>
+              <Line label="Cap per side">{maxOi > 0n ? `${formatMtok(maxOi)} MTok` : "No cap"}</Line>
               <Line label="Funding">{funding > 0n ? "Longs pay shorts" : funding < 0n ? "Shorts pay longs" : "Nobody pays, sides are even"}</Line>
             </dl>
           </Panel>
-          <Panel inset title="Index posts" className="min-h-[200px] border-t border-line lg:min-h-0 lg:flex-1" bodyClassName="flex flex-col">
+          <Panel inset title="Index history" className="min-h-[200px] border-t border-line lg:min-h-0 lg:flex-1" bodyClassName="flex flex-col">
             {postRuns.length === 0 ? (
               <p className="px-4 py-4 text-[12px] text-muted">No posts yet.</p>
             ) : (
@@ -439,14 +476,14 @@ export default function PerpsPage() {
                   return (
                     <li key={`${run.from}-${run.to}`} className="flex min-h-6 items-baseline justify-between gap-3 px-4 py-0.5 text-[12px] tabular-nums">
                       <span className="text-ink">
-                        {usd(run.price)}{" "}
+                        {postPrices[position]}{" "}
                         <span className={move > 0n ? "text-up" : move < 0n ? "text-down" : "text-muted"}>
-                          {older ? `${move > 0n ? "+" : ""}${percent(move, older.price)}` : "first"}
+                          {older ? `${move > 0n ? "+" : ""}${percent(move, older.price)}` : ""}
                         </span>
                       </span>
                       <span className="text-right text-muted">
                         {run.count > 1
-                          ? `${clockFormat.format(new Date(run.from * 1000)).slice(0, 5)} to ${clockFormat.format(new Date(run.to * 1000)).slice(0, 5)}, ${run.count} posts`
+                          ? `${clockFormat.format(new Date(run.from * 1000)).slice(0, 5)} to ${clockFormat.format(new Date(run.to * 1000)).slice(0, 5)} (${run.count} posts)`
                           : clockFormat.format(new Date(run.from * 1000))}
                       </span>
                     </li>
@@ -457,11 +494,9 @@ export default function PerpsPage() {
           </Panel>
         </div>
 
-        <section aria-label="Order ticket" className={`${panel === "trade" ? "flex" : "hidden"} min-h-0 flex-col lg:flex`}>
+        <section aria-label="Order ticket" className={`${panel === "trade" ? "flex" : "hidden"} min-h-0 flex-col lg:col-[3] lg:row-[1/3] lg:flex`}>
           <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
-            <h2 className="text-[13px] text-ink">
-              <span aria-hidden>[ </span>Market order<span aria-hidden> ]</span>
-            </h2>
+            <h2 className="text-[13px] text-ink">Market order</h2>
             <span className="text-[12px] text-muted">Fills at the index</span>
           </div>
           <form
@@ -470,129 +505,99 @@ export default function PerpsPage() {
               event.preventDefault();
               void submit();
             }}
-            className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 *:shrink-0"
+            className="flex min-h-0 flex-1 flex-col lg:overflow-y-auto lg:[scrollbar-width:thin]"
           >
-            <Toggle
-              big
-              label="Side"
-              value={side}
-              onChange={(next) => {
-                setSide(next);
-                setProblem(null);
-              }}
-              items={[
-                { value: "long", label: "Long", tone: "up", hotkey: "B" },
-                { value: "short", label: "Short", tone: "down", hotkey: "S" },
-              ]}
-            />
-            {accountId ? (
-              <dl className="flex flex-col gap-1.5">
-                <Line label="Wallet">{wallet === null ? "Reading" : usd(wallet)}</Line>
-                <Line label="Position">{describe(held)}</Line>
-              </dl>
-            ) : null}
-            <Field label="Size (MTok)" alert={problem !== null} note={problem ?? undefined}>
-              <input
+            <div className="flex flex-col gap-3 p-4 *:shrink-0">
+              <Segmented
+                label="Side"
+                value={side}
+                onChange={(next) => {
+                  setSide(next);
+                  setProblem(null);
+                }}
+                items={[
+                  { value: "long", label: "Long", tone: "up", hotkey: "B" },
+                  { value: "short", label: "Short", tone: "down", hotkey: "S" },
+                ]}
+              />
+              {accountId ? (
+                <dl className="flex flex-col gap-1.5">
+                  <Line label="Wallet">{wallet === null ? "Reading" : usd(wallet)}</Line>
+                  <Line label="Position">{describe(held)}</Line>
+                </dl>
+              ) : null}
+              <Amount
                 ref={sizeRef}
+                label="Size"
+                unit="MTok"
                 value={size}
                 onChange={(event) => setSize(event.target.value)}
                 inputMode="decimal"
                 autoComplete="off"
-                aria-invalid={problem !== null}
                 aria-keyshortcuts="/"
-                className={INPUT}
+                alert={problem !== null}
+                note={problem ?? undefined}
               />
-            </Field>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={share}
-                disabled={max === 0n}
-                aria-label="Size as a share of the most your wallet can open"
-                onChange={(event) => setSize(sizeText((max * BigInt(event.target.value)) / 100n))}
-                style={sizeFill}
-                className={`range h-5 min-w-0 flex-1 ${FOCUS}`}
-              />
-              <span className="w-10 text-right text-[12px] tabular-nums text-muted">{share}%</span>
-            </div>
-            <div role="group" aria-label="Size presets" className="flex gap-1.5">
-              {PRESETS.map((part) => (
-                <button key={part.toString()} type="button" disabled={max === 0n} onClick={() => setSize(sizeText((max * part) / 100n))} className={CHIP}>
-                  {part === 100n ? "Max" : `${part}%`}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-baseline justify-between text-[13px]">
-                <label htmlFor="leverage" className="text-muted">
-                  Leverage
-                </label>
-                <span className="tabular-nums text-ink">{chosen}x</span>
+              {max > 0n ? (
+                <Portion
+                  value={share}
+                  label="Size as a share of the most your wallet can open"
+                  onChange={(percent) => setSize(sizeText((max * BigInt(percent)) / 100n))}
+                />
+              ) : null}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[13px] text-muted">Leverage</span>
+                <Segmented
+                  label="Leverage"
+                  value={String(chosen)}
+                  onChange={(next) => setLeverage(Number(next))}
+                  items={leverages.map((value) => ({ value: String(value), label: `${value}x` }))}
+                />
               </div>
-              <input
-                id="leverage"
-                type="range"
-                min={1}
-                max={maxLeverage}
-                step={1}
-                value={chosen}
-                aria-keyshortcuts="[ ]"
-                onChange={(event) => setLeverage(Number(event.target.value))}
-                style={leverageFill}
-                className={`range h-5 w-full ${FOCUS}`}
-              />
-              <div role="group" aria-label="Leverage presets" className="flex gap-1.5">
-                {leverages.map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={value === chosen}
-                    onClick={() => setLeverage(value)}
-                    className={CHIP}
-                  >
-                    {value}x
-                  </button>
-                ))}
+              <div className="flex flex-col gap-1.5 border-t border-line pt-3 lg:hidden">
+                {costs}
+                {outcome}
               </div>
+              <p className="text-[13px] leading-[19px] text-muted">Settles in USDC against the index. Margin moves from your wallet into the position.</p>
             </div>
-            <dl className="flex flex-col gap-1.5 border-t border-line pt-3">
-              <Line label="Entry price">{price > 0n ? usd(price) : "No index"}</Line>
-              <Line label="Notional">{usd(notional(delta, price))}</Line>
-              <Line label="Margin">{usd(margin)}</Line>
-              <Line label="Fee (0.1%)">{usd(fees)}</Line>
-              <Line label="Liquidation price">{liquidation === null || liquidation === 0n ? "None" : usd(liquidation)}</Line>
-              <Line label="Position after">{after ? describe(after.size) : "None"}</Line>
-            </dl>
-            {paused ? <p className="text-[12px] leading-[18px] text-down">{paused}</p> : null}
-            <CommitButton
-              type="submit"
-              tone={!accountId ? "ink" : side === "long" ? "up" : "down"}
-              disabled={busy || (accountId !== null && !open)}
-              aria-busy={busy}
-              className="mt-2 w-full"
-            >
-              {busy ? "Waiting for the wallet" : accountId ? `${side === "long" ? "Long" : "Short"} ${sizeText(tokens)} MTok` : "Connect wallet to trade"}
-            </CommitButton>
-            {notice ? (
-              <p role="status" className={`text-[13px] leading-[20px] ${notice.tone === "up" ? "text-up" : "text-down"}`}>
-                {notice.text}{" "}
-                {notice.tx ? (
-                  <a href={explorer("txns", notice.tx)} target="_blank" rel="noreferrer" className={LINK}>
-                    View transaction
-                  </a>
-                ) : null}
-              </p>
-            ) : null}
-            <p className="text-[12px] leading-[18px] text-muted">Settles in USDC against the index. Margin moves from your wallet into the position.</p>
+            <div className="sticky bottom-[52px] z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 shadow-[0_-8px_16px_-8px_rgb(30_30_30/0.16)] lg:bottom-0 lg:pb-4 lg:shadow-none">
+              <div className="hidden flex-col gap-1.5 lg:flex">
+                {costs}
+                {outcome}
+              </div>
+              <dl className="flex items-baseline justify-between gap-4 text-[13px] tabular-nums lg:hidden">
+                <Pair label="Margin">{amount(margin)}</Pair>
+                <Pair label="Liquidates at">{liquidation === null || liquidation === 0n ? NIL : at(liquidation)}</Pair>
+              </dl>
+              {paused ? <p className="text-[13px] leading-[19px] text-down">{paused}</p> : null}
+              <CommitButton
+                type="submit"
+                tone={!accountId ? "ink" : side === "long" ? "up" : "down"}
+                disabled={busy || (accountId !== null && !open)}
+                aria-busy={busy}
+                className="w-full"
+              >
+                {busy ? "Waiting for the wallet" : accountId ? `${side === "long" ? "Long" : "Short"} ${sizeText(tokens)} MTok` : "Connect wallet to trade"}
+              </CommitButton>
+              {notice ? (
+                <p role="status" className={`text-[13px] leading-[20px] ${notice.tone === "up" ? "text-up" : "text-down"}`}>
+                  {notice.text}{" "}
+                  {notice.tx ? (
+                    <a href={explorer("txns", notice.tx)} target="_blank" rel="noreferrer" className={LINK}>
+                      View transaction
+                    </a>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
           </form>
         </section>
-      </div>
 
-      <section aria-label="Positions and history" className={`${panel === "positions" ? "block" : "hidden"} border-t border-line lg:block`}>
-        <div className="flex h-10 items-center border-b border-line px-4">
+        <section
+          aria-label="Positions and history"
+          className={`${panel === "positions" ? "flex" : "hidden"} min-h-0 flex-col border-t border-line lg:col-[1/3] lg:row-[2] lg:flex lg:border-r`}
+        >
+        <div className="flex h-10 shrink-0 items-center justify-between gap-6 border-b border-line px-4">
           <Toggle
             label="Account view"
             value={view}
@@ -602,7 +607,17 @@ export default function PerpsPage() {
               { value: "history", label: "History" },
             ]}
           />
+          {account ? (
+            <dl className="hidden items-baseline gap-6 text-[13px] tabular-nums lg:flex">
+              <Pair label="Equity">{usd((wallet ?? 0n) + inPositions + unrealized)}</Pair>
+              <Pair label="Margin in positions">{usd(inPositions)}</Pair>
+              <Pair label="Unrealized PnL" tone={unrealized > 0n ? "up" : unrealized < 0n ? "down" : undefined}>
+                {signed(unrealized)}
+              </Pair>
+            </dl>
+          ) : null}
         </div>
+        <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {!accountId ? (
           <Empty
             action={
@@ -641,7 +656,7 @@ export default function PerpsPage() {
                     {item.change === 0n ? "0" : `${item.change > 0n ? "+" : "-"}${formatMtok(abs(item.change))}`}
                   </td>
                   <td className={`${TD} text-right`}>{describe(BigInt(item.event.size))}</td>
-                  <td className={`${TD} text-right`}>{item.event.price_micro_per_mtok === "0" ? "Unknown" : usd(BigInt(item.event.price_micro_per_mtok))}</td>
+                  <td className={`${TD} text-right`}>{item.event.price_micro_per_mtok === "0" ? NIL : fmtPrice(BigInt(item.event.price_micro_per_mtok))}</td>
                   <td className={`${TD} text-right`}>{usd(BigInt(item.event.fee_usd_micro))}</td>
                   <td className={TD}>
                     <a href={explorer("txns", item.event.tx_hash)} target="_blank" rel="noreferrer" className={`${LINK} font-mono text-[12px]`}>
@@ -668,13 +683,13 @@ export default function PerpsPage() {
                       {entry.model} <span className={amount > 0n ? "text-up" : "text-down"}>{describe(amount)}</span>
                     </h3>
                     <dl className="flex flex-col gap-1.5">
-                      <Line label="Entry">{usd(BigInt(entry.entry_price_micro_per_mtok))}</Line>
-                      <Line label="Index">{posted > 0n ? usd(posted) : "None"}</Line>
+                      <Line label="Entry">{fmtPrice(BigInt(entry.entry_price_micro_per_mtok))}</Line>
+                      <Line label="Index">{posted > 0n ? fmtPrice(posted) : NIL}</Line>
                       <Line label="Margin">{usd(BigInt(entry.margin_usd_micro))}</Line>
                       <Line label="PnL" tone={pnl > 0n ? "up" : pnl < 0n ? "down" : undefined}>
                         {signed(pnl)} ({percent(pnl, BigInt(entry.margin_usd_micro))})
                       </Line>
-                      <Line label="Liquidation price">{liq === 0n ? "None" : usd(liq)}</Line>
+                      <Line label="Liquidation price">{liq === 0n ? NIL : fmtPrice(liq)}</Line>
                     </dl>
                     <div className="flex items-center justify-between gap-2">
                       {marginControls(entry)}
@@ -713,17 +728,17 @@ export default function PerpsPage() {
                         {entry.model} <span className={amount > 0n ? "text-up" : "text-down"}>{amount > 0n ? "Long" : "Short"}</span>
                       </td>
                       <td className={`${TD} text-right`}>{formatMtok(abs(amount))}</td>
-                      <td className={`${TD} text-right`}>{usd(BigInt(entry.entry_price_micro_per_mtok))}</td>
-                      <td className={`${TD} text-right`}>{posted > 0n ? usd(posted) : "None"}</td>
+                      <td className={`${TD} text-right`}>{fmtPrice(BigInt(entry.entry_price_micro_per_mtok))}</td>
+                      <td className={`${TD} text-right`}>{posted > 0n ? fmtPrice(posted) : NIL}</td>
                       <td className={`${TD} text-right`}>{usd(BigInt(entry.margin_usd_micro))}</td>
                       <td className={`${TD} text-right ${pnl > 0n ? "text-up" : pnl < 0n ? "text-down" : ""}`}>
                         {signed(pnl)} ({percent(pnl, BigInt(entry.margin_usd_micro))})
                       </td>
-                      <td className={`${TD} text-right`}>{liq === 0n ? "None" : usd(liq)}</td>
+                      <td className={`${TD} text-right`}>{liq === 0n ? NIL : fmtPrice(liq)}</td>
                       <td className={`${TD} text-right`}>{usd(BigInt(entry.funding_owed_usd_micro))}</td>
                       <td className={TD}>{marginControls(entry)}</td>
                       <td className={`${TD} text-right`}>
-                        <button type="button" disabled={busy} onClick={() => close(entry)} className={SECONDARY}>
+                        <button type="button" disabled={busy} onClick={() => close(entry)} className={SMALL}>
                           Close
                         </button>
                       </td>
@@ -734,16 +749,18 @@ export default function PerpsPage() {
             </div>
           </>
         )}
+        </div>
       </section>
+      </div>
 
       <MobileTabs
         value={panel}
         onChange={setPanel}
         items={[
-          { value: "chart", label: "Chart" },
-          { value: "market", label: "Market" },
-          { value: "trade", label: "Trade" },
-          { value: "positions", label: "Positions" },
+          { value: "chart", label: "Chart", icon: ChartCandlestick },
+          { value: "market", label: "Index", icon: Activity },
+          { value: "trade", label: "Trade", icon: ArrowLeftRight },
+          { value: "positions", label: "Account", icon: Wallet },
         ]}
       />
     </div>

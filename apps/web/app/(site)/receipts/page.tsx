@@ -1,6 +1,6 @@
 import { and, desc, eq, isNotNull } from "drizzle-orm";
-import { Empty, LINK, PAGE, PageHeader, Panel, ROW, Stat, TD, Table } from "../../../components/kit";
-import { ago, explorer, usd } from "../../../lib/client";
+import { Empty, LINK, NIL, PAGE, PageHeader, Panel, ROW, TD, Table } from "../../../components/kit";
+import { ago, explorer, price, usd } from "../../../lib/client";
 import { db } from "../../../lib/db";
 import { MARKETS, readMarket } from "../../../lib/perp";
 import { blended, clockFormat, formatMtok, referenceFor } from "../../../lib/price";
@@ -63,6 +63,18 @@ export default async function ReceiptsPage() {
     catalog().catch(() => []),
   ]);
 
+  const rows = markets.map(({ model, market, rollups }) => {
+    const listed = referenceFor(model, rails);
+    return {
+      model,
+      rollups,
+      posted: market && market.updatedAt > 0n ? market : null,
+      reference: listed ? blended(listed.pricing) : null,
+      fills: rollups.reduce((total, rollup) => total + rollup.fills, 0),
+      volume: rollups.reduce((total, rollup) => total + BigInt(rollup.mixed_tokens), 0n),
+    };
+  });
+
   return (
     <div className={PAGE}>
       <PageHeader title="Receipts">
@@ -73,55 +85,67 @@ export default async function ReceiptsPage() {
         . Recompute the index in your own browser, and follow every payout to its transaction.
       </PageHeader>
 
-      {markets.map(({ model, market, rollups }) => {
-        const posted = market && market.updatedAt > 0n ? market : null;
-        const reference = referenceFor(model, rails);
-        const fills = rollups.reduce((total, rollup) => total + rollup.fills, 0);
-        const volume = rollups.reduce((total, rollup) => total + BigInt(rollup.mixed_tokens), 0n);
-        return (
-          <Panel key={model} title={model} bodyClassName="flex flex-col gap-6 pt-5">
-            <dl className="flex flex-wrap gap-x-10 gap-y-4">
-              <Stat label="Index">{posted ? usd(posted.price) : "Not posted"}</Stat>
-              <Stat label="Posted">{posted ? ago(now - Number(posted.updatedAt)) : "Never"}</Stat>
-              <Stat label="Rollups, 2 h">{rollups.length}</Stat>
-              <Stat label="Fills, 2 h">{fills}</Stat>
-              <Stat label="Volume, 2 h">{formatMtok(volume)} MTok</Stat>
-              <Stat label="Allowed band">
-                {reference ? `${usd(blended(reference.pricing) / 10n)} to ${usd(blended(reference.pricing))}` : "No list price"}
-              </Stat>
-            </dl>
-            {reference ? <Recompute model={model} reference={blended(reference.pricing).toString()} window={WINDOW} /> : null}
-            {rollups.length === 0 ? (
-              <Empty start>No rollups in the last two hours. One is written for every minute with fills.</Empty>
-            ) : (
-              <Table
-                minWidth={720}
-                columns={[
-                  { label: "Minute (UTC)" },
-                  { label: "Fills", end: true },
-                  { label: "MTok", end: true },
-                  { label: "VWAP", end: true },
-                  { label: "Charged", end: true },
-                  { label: "Usage root" },
-                ]}
-              >
-                {rollups.toReversed().map((rollup) => (
-                  <tr key={rollup.minute} className={ROW}>
-                    <td className={TD}>{minute(rollup.minute)}</td>
-                    <td className={`${TD} text-right`}>{rollup.fills}</td>
-                    <td className={`${TD} text-right`}>{formatMtok(BigInt(rollup.mixed_tokens))}</td>
-                    <td className={`${TD} text-right`}>{usd(BigInt(rollup.vwap_micro_per_mtok))}</td>
-                    <td className={`${TD} text-right`}>{usd(BigInt(rollup.charge_usd_micro))}</td>
-                    <td className={`${TD} font-mono text-[12px] text-muted`} title={rollup.usage_root}>
-                      {short(rollup.usage_root)}
-                    </td>
-                  </tr>
-                ))}
-              </Table>
-            )}
+      <Panel title="Index by market" bodyClassName="flex flex-col gap-4 pt-5">
+        <p className="max-w-[68ch] text-pretty text-[13px] leading-[20px] text-ink">
+          Recompute reads the rollups and the posted index straight from {CORE} over public NEAR RPC, then runs the keeper&apos;s math in this browser.
+        </p>
+        <Table
+          minWidth={960}
+          columns={[
+            { label: "Market" },
+            { label: "Index", end: true },
+            { label: "Posted" },
+            { label: "Rollups, 2 h", end: true },
+            { label: "Fills, 2 h", end: true },
+            { label: "Volume, 2 h", end: true },
+            { label: "Allowed band" },
+            { label: "" },
+          ]}
+        >
+          {rows.map((row) => (
+            <Recompute key={row.model} model={row.model} reference={row.reference?.toString() ?? null} window={WINDOW} span={8}>
+              <td className={TD}>{row.model}</td>
+              <td className={`${TD} text-right`}>{row.posted ? price(row.posted.price) : "Not posted"}</td>
+              <td className={`${TD} text-muted`}>{row.posted ? ago(now - Number(row.posted.updatedAt)) : "Never"}</td>
+              <td className={`${TD} text-right`}>{row.rollups.length}</td>
+              <td className={`${TD} text-right`}>{row.fills}</td>
+              <td className={`${TD} text-right`}>{formatMtok(row.volume)} MTok</td>
+              <td className={TD}>{row.reference ? `${price(row.reference / 10n)} to ${price(row.reference)}` : "No list price"}</td>
+            </Recompute>
+          ))}
+        </Table>
+      </Panel>
+
+      {rows
+        .filter((row) => row.rollups.length > 0)
+        .map((row) => (
+          <Panel key={row.model} title={`${row.model} rollups, last 2 h`} bodyClassName="pt-2">
+            <Table
+              minWidth={720}
+              columns={[
+                { label: "Minute (UTC)" },
+                { label: "Fills", end: true },
+                { label: "MTok", end: true },
+                { label: "VWAP", end: true },
+                { label: "Charged", end: true },
+                { label: "Usage root" },
+              ]}
+            >
+              {row.rollups.toReversed().map((rollup) => (
+                <tr key={rollup.minute} className={ROW}>
+                  <td className={TD}>{minute(rollup.minute)}</td>
+                  <td className={`${TD} text-right`}>{rollup.fills}</td>
+                  <td className={`${TD} text-right`}>{formatMtok(BigInt(rollup.mixed_tokens))}</td>
+                  <td className={`${TD} text-right`}>{price(BigInt(rollup.vwap_micro_per_mtok))}</td>
+                  <td className={`${TD} text-right`}>{usd(BigInt(rollup.charge_usd_micro))}</td>
+                  <td className={`${TD} font-mono text-[12px] text-muted`} title={rollup.usage_root}>
+                    {short(rollup.usage_root)}
+                  </td>
+                </tr>
+              ))}
+            </Table>
           </Panel>
-        );
-      })}
+        ))}
 
       <Panel title="NEAR AI proofs" bodyClassName="flex flex-col gap-4 pt-5">
         <p className="max-w-[68ch] text-[13px] leading-[20px] text-ink">
@@ -143,9 +167,9 @@ export default async function ReceiptsPage() {
                 <tr key={row.at.toISOString()} className={ROW}>
                   <td className={TD}>{clockFormat.format(row.at)}</td>
                   <td className={TD}>{row.model}</td>
-                  <td className={TD}>{proof?.signature_kind ?? "Unknown"}</td>
+                  <td className={TD}>{proof?.signature_kind ?? NIL}</td>
                   <td className={`${TD} ${valid ? "text-up" : "text-down"}`}>{valid ? "Verified" : "Not verified"}</td>
-                  <td className={`${TD} font-mono text-[12px] text-muted`}>{proof ? short(proof.signing_address) : "None"}</td>
+                  <td className={`${TD} font-mono text-[12px] text-muted`}>{proof ? short(proof.signing_address) : NIL}</td>
                 </tr>
               );
             })}

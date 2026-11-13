@@ -4,6 +4,7 @@ import {
   blended,
   candlesFromPoints,
   charge,
+  dayChange,
   estimatePromptTokens,
   fillsToPoints,
   formatMicroPerMtok,
@@ -18,6 +19,7 @@ import {
   reservation,
   sellerEarning,
 } from "./price.ts";
+import type { UTCTimestamp } from "lightweight-charts";
 import type { Pricing, Rail } from "./types.ts";
 
 const glm: Pricing = { prompt: 1_400_000n, completion: 4_400_000n };
@@ -174,4 +176,11 @@ test("every fill reaches its candle, and each candle opens at the previous close
   ]);
   assert.deepEqual(ohlcv(300), [[at("2026-11-01T10:00:00Z"), 0.16, 0.1746, 0.1, 0.1, 1.25]]);
   assert.equal(fillsToPoints(fills, Date.parse("2026-11-01T10:01:00Z")).length, 3);
+});
+
+test("dayChange compares the first and last points of the last 24 hours", () => {
+  const at = (time: number, value: number) => ({ time: time as UTCTimestamp, value, volume: 0 });
+  assert.equal(dayChange([at(0, 9), at(100_000, 0.5), at(150_000, 0.55)], 170_000)?.toFixed(2), "10.00");
+  assert.equal(dayChange([at(100_000, 0.5)], 170_000), null);
+  assert.equal(dayChange([], 170_000), null);
 });

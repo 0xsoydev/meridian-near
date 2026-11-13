@@ -1,7 +1,5 @@
-import Image from "next/image";
 import Link from "next/link";
 import { explorer } from "../../lib/client";
-import goddess from "../../public/images/goddess.webp";
 import { FOCUS } from "../kit";
 import { NAV_LINKS } from "../nav-links";
 import { WRAP } from "./shared";
@@ -14,8 +12,7 @@ const GROUPS = [
     title: "Docs",
     links: [
       { label: "Agent manual", href: "/skill.md" },
-      { label: "Plan", href: "https://github.com/0xsoydev/meridian-near/blob/develop/docs/plan.md" },
-      { label: "README", href: "https://github.com/0xsoydev/meridian-near" },
+      { label: "Source code", href: "https://github.com/0xsoydev/meridian-near" },
     ],
   },
   {
@@ -47,22 +44,10 @@ export function SiteFooter() {
           ))}
         </nav>
       </div>
-      <div aria-hidden className="relative mx-auto w-full max-w-[1440px] lg:h-[min(38vw,460px)]">
-        <Image
-          src={goddess}
-          alt=""
-          sizes="(min-width: 640px) 640px, 100vw"
-          className="pointer-events-none mx-auto w-full max-w-[640px] lg:hidden"
-        />
-        <p className="-mb-[0.18em] select-none whitespace-nowrap text-center font-sans text-[17.5vw] font-bold leading-none tracking-[-0.045em] text-muted/20 lg:absolute lg:bottom-[-0.12em] lg:left-1/2 lg:mb-0 lg:-translate-x-1/2 min-[1440px]:text-[252px]">
-          <svg viewBox="0 0 454 100" className="inline-block h-[1em] w-[4.54em] fill-current">
-            <text x="0" y="86" textLength="454" lengthAdjust="spacingAndGlyphs" fontSize="100">
-              MERIDIAN
-            </text>
-          </svg>
-        </p>
-        <Image src={goddess} alt="" sizes="920px" className="absolute bottom-0 right-0 hidden h-full w-auto max-w-none lg:block" />
-      </div>
+      <div
+        aria-hidden
+        className="mx-auto mb-[-2%] aspect-[57/13] w-[calc(100%-40px)] max-w-[1200px] bg-line [mask:url(/images/namelogo.svg)_center/contain_no-repeat] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)]"
+      />
     </footer>
   );
 }
