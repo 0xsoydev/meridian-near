@@ -11,6 +11,7 @@ import {
   INPUT_SM,
   LINK,
   Line,
+  NIL,
   PAGE,
   PageHeader,
   Panel,
@@ -20,7 +21,7 @@ import {
   TD,
   Table,
 } from "../../../components/kit";
-import { api, explorer, percent, railName, usd } from "../../../lib/client";
+import { api, explorer, percent, price as fmtPrice, railName, usd } from "../../../lib/client";
 import { MARKETS } from "../../../lib/markets";
 import { charge, formatMicroPerMtok, formatMtok, parseUsd, sellerEarning } from "../../../lib/price";
 import type { Book, SellerListing, SellerPayouts, VenueStatus } from "../../../lib/types";
@@ -48,9 +49,9 @@ function Landing({ book, index, price }: { book: Book | null; index: string | nu
   return (
     <dl aria-live="polite" className="flex flex-col gap-1.5 border-l-2 border-line pl-3">
       <Line label="Place in line">{price === null ? "Enter a price" : asks.length === 0 ? "First ask in the book" : `${ordinal(ahead.length + 1)} of ${asks.length + 1}`}</Line>
-      <Line label="Ahead of you">{price === null ? "None" : `${formatMtok(depth)} MTok`}</Line>
-      <Line label="Best ask now">{best === null ? "None" : usd(best)}</Line>
-      {index !== null ? <Line label="Index">{usd(BigInt(index))}</Line> : null}
+      <Line label="Ahead of you">{price === null ? NIL : `${formatMtok(depth)} MTok`}</Line>
+      <Line label="Best ask now">{best === null ? NIL : fmtPrice(best)}</Line>
+      {index !== null ? <Line label="Index">{fmtPrice(BigInt(index))}</Line> : null}
     </dl>
   );
 }
@@ -166,7 +167,7 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
     setNotice(null);
     if (!chosen) return flag("send", "Pick a model this provider serves.");
     if (micro === null || micro === 0n) return flag("price", "Enter a price in USD per MTok, like 0.17.");
-    if (above && list !== null) return flag("price", `Price it at or below ${provider}'s list price of ${usd(list)}.`);
+    if (above && list !== null) return flag("price", `Price it at or below ${provider}'s list price of ${fmtPrice(list)}.`);
     if (mtok === 0n) return flag("capacity", "Enter the capacity in whole MTok, like 20.");
     if (!source) {
       if (oauth && oauthCode.trim() === "") {
@@ -306,7 +307,7 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                   </Field>
                 </Step>
                 <Step n={2}>
-                  <Field label="Model" note={list !== null ? `${provider} lists it at ${usd(list)} per MTok, blended three input to one output.` : undefined}>
+                  <Field label="Model" note={list !== null ? `${provider} lists it at ${fmtPrice(list)} per MTok, blended three input to one output.` : undefined}>
                     <Select value={model} onChange={(event) => setModel(event.target.value)}>
                       {models.map((entry) => (
                         <option key={entry.id} value={entry.id}>
@@ -327,9 +328,9 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                         : list === null
                         ? undefined
                         : micro === null
-                          ? `At or below ${usd(list)}. Lower asks fill first.`
+                          ? `At or below ${fmtPrice(list)}. Lower asks fill first.`
                           : above
-                            ? `Above ${provider}'s list price of ${usd(list)}. Buyers can't be charged more than list.`
+                            ? `Above ${provider}'s list price of ${fmtPrice(list)}. Buyers can't be charged more than list.`
                             : `${percent(list - micro, list)} below ${provider}'s list price. Lower asks fill first.`
                     }
                   >
@@ -337,7 +338,6 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                       ref={priceRef}
                       value={price}
                       onChange={(event) => setPrice(event.target.value)}
-                      placeholder={list === null ? "0.17" : formatMicroPerMtok(list)}
                       inputMode="decimal"
                       autoComplete="off"
                       aria-invalid={above || problem?.field === "price"}
@@ -489,7 +489,7 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
             <>
               <div className="flex flex-col gap-1">
                 <p className="text-[13px] text-muted">Unpaid</p>
-                <p className="text-[28px] leading-none tabular-nums text-ink">{payouts ? usd(BigInt(payouts.unpaid_usd_micro)) : "Reading"}</p>
+                <p className="font-serif text-[36px] leading-none tracking-[-0.01em] text-ink">{payouts ? usd(BigInt(payouts.unpaid_usd_micro)) : "Reading"}</p>
               </div>
               <dl className="flex flex-col gap-1.5">
                 <Line label="Paid so far">{usd(paidTotal)}</Line>
@@ -602,7 +602,7 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                         className={`${INPUT_SM} w-24`}
                       />
                     ) : (
-                      usd(BigInt(listing.price_micro_per_mtok))
+                      fmtPrice(BigInt(listing.price_micro_per_mtok))
                     )}
                   </td>
                   <td className={TD}>

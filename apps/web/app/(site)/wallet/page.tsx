@@ -638,6 +638,7 @@ export default function WalletPage() {
   const testnetDeposit = !MAINNET && direction === "deposit";
   const nearForm = route === "near" && (!testnetDeposit || (viaNear && (balances?.near ?? 0n) > 0n));
   const faucetLabel = busy === "faucet" ? "Waiting for the wallet" : "Get 10 test USDC";
+  const funded = balances !== null && balances.wallet >= 1_000_000n;
   const footnote =
     route === "chain"
       ? "Routed by NEAR Intents 1Click. A quote holds for a few minutes."
@@ -668,7 +669,7 @@ export default function WalletPage() {
         )}
         <p className="text-[14px] leading-[22px] text-muted">
           USDC on {CORE || "core"}, held for{" "}
-          <a href={explorer("address", accountId)} target="_blank" rel="noreferrer" className={`${LINK} break-all text-ink`}>
+          <a href={explorer("address", accountId)} target="_blank" rel="noreferrer" className={`${LINK} text-ink [overflow-wrap:anywhere]`}>
             {own ?? accountId}
           </a>
           {balances && balances.near > 0n ? (
@@ -732,16 +733,18 @@ export default function WalletPage() {
           {testnetDeposit ? (
             <div className="flex flex-col items-start gap-2">
               {nearForm ? (
-                <button type="button" disabled={busy !== null} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()} className={SECONDARY}>
+                <button type="button" disabled={busy !== null || funded} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()} className={SECONDARY}>
                   {faucetLabel}
                 </button>
               ) : (
-                <CommitButton disabled={busy !== null} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()}>
+                <CommitButton disabled={busy !== null || funded} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()}>
                   {faucetLabel}
                 </CommitButton>
               )}
               <p className="text-pretty text-[13px] leading-[20px] text-muted">
-                This demo runs on NEAR testnet. The faucet tops up wallets holding under $1.00; deposits from other chains run on mainnet.
+                {funded && balances
+                  ? `This demo runs on NEAR testnet. Your wallet holds ${usd(balances.wallet)}, and the faucet only tops up wallets under $1.00.`
+                  : "This demo runs on NEAR testnet. The faucet tops up wallets holding under $1.00; deposits from other chains run on mainnet."}
               </p>
             </div>
           ) : null}
@@ -818,7 +821,7 @@ export default function WalletPage() {
 
           {route === "near" ? (
             nearForm ? (
-              <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void moveOnNear()} className="self-start">
+              <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void moveOnNear()} className="w-full sm:w-auto sm:self-start">
                 {busy === "move" ? "Waiting for the wallet" : `${direction === "deposit" ? "Deposit" : "Withdraw"} ${amount || "0"} USDC`}
               </CommitButton>
             ) : null
@@ -912,7 +915,7 @@ export default function WalletPage() {
                   {statusText(quoteStatus, direction, chain, false)}
                 </p>
               ) : quote.depositAddress ? (
-                <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void sendChainWithdraw()} className="self-start">
+                <CommitButton disabled={busy !== null} aria-busy={busy === "move"} onClick={() => void sendChainWithdraw()} className="w-full sm:w-auto sm:self-start">
                   {busy === "move" ? "Waiting for the wallet" : `Withdraw ${amount} USDC as ${token?.symbol ?? "it"} on ${chain}`}
                 </CommitButton>
               ) : null}
