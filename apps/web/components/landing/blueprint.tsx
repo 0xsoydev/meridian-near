@@ -115,7 +115,7 @@ export function Actor({
 export function Connector({ label }: { label: string }) {
   return (
     <div aria-hidden className="flex items-center justify-center gap-3 py-3 lg:flex-col lg:gap-2 lg:px-1 lg:py-0">
-      <span className="order-2 text-[12px] leading-[16px] text-muted lg:order-1 lg:text-center">{label}</span>
+      <span className="order-2 text-[13px] leading-[17px] text-muted lg:order-1 lg:text-center">{label}</span>
       <span className="order-1 flex flex-col items-center text-accent lg:order-2 lg:w-full lg:flex-row">
         <span className="h-6 border-l border-dashed border-accent/70 lg:h-0 lg:w-full lg:border-l-0 lg:border-t" />
         <ChevronRight className="-mt-1 size-3.5 rotate-90 lg:-ml-1.5 lg:mt-0 lg:rotate-0" />

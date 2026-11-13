@@ -1,4 +1,3 @@
-import { AgentsTerminal } from "../components/landing/agents-terminal";
 import { Capacity } from "../components/landing/capacity";
 import { LandingHeader } from "../components/landing/header";
 import { Hedge } from "../components/landing/hedge";
@@ -21,10 +20,9 @@ export default function Home() {
         <Story />
         <Capacity />
         <RequestStory />
-        <Limit />
+        <Limit host={HOST} />
         <Hedge />
         <Proof />
-        <AgentsTerminal variant="section" host={HOST} />
         <WaysIn />
       </main>
       <SiteFooter />

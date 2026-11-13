@@ -64,7 +64,7 @@ export default function AgentsPage() {
         you set on chain.
       </PageHeader>
 
-      <AgentsTerminal variant="bare" />
+      <AgentsTerminal />
 
       <ol className="flex flex-col">
         {STEPS.map((step, index) => (
