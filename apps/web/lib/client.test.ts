@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { NEAR_ACCOUNT, ago, evmTransfer, fundingPercent, paymentUri, percent, sentence, shortAccount, usd } from "./client.ts";
+import { NEAR_ACCOUNT, ago, amount, evmTransfer, fixed, fundingPercent, paymentUri, percent, price, sentence, shortAccount, tick, usd } from "./client.ts";
+
+test("prices keep four decimals from one rounding, never cents padded with zeros", () => {
+  assert.equal(price(963_000n), "$0.9630");
+  assert.equal(price(1_011_150n), "$1.0112");
+  assert.equal(price(2_787_500n), "$2.7875");
+  assert.equal(price(-49_500n), "-$0.0495");
+  assert.equal(price(-40n), "$0.0000");
+  assert.equal(tick(525_000n), "0.5250");
+  assert.equal(fixed(1_234_567_891n, 2), "$1,234.57");
+  assert.equal(amount(525_000n), "$0.5250");
+  assert.equal(amount(4_800_000n), "$4.80");
+  assert.equal(amount(0n), "$0.00");
+});
 
 test("sentence turns router errors into sentences", () => {
   assert.equal(sentence("credential rejected by the rail"), "Credential rejected by the rail.");

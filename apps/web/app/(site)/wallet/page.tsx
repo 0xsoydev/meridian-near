@@ -18,6 +18,7 @@ import {
   Panel,
   ROW,
   SECONDARY,
+  Segmented,
   Select,
   Skeleton,
   TD,
@@ -680,8 +681,7 @@ export default function WalletPage() {
 
       <div className="grid gap-12 lg:grid-cols-[400px_minmax(0,1fr)]">
         <Panel title="Move money" bodyClassName="flex flex-col gap-5 pt-5">
-          <Toggle
-            big
+          <Segmented
             label="Direction"
             value={direction}
             onChange={(next) => {

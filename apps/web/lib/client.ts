@@ -113,6 +113,20 @@ export function usd(micro: bigint): string {
   return `${negative ? "-" : ""}$${whole}.${fraction}`;
 }
 
+export function fixed(micro: bigint, places: number): string {
+  const step = 10n ** BigInt(6 - places);
+  const unit = 10n ** BigInt(places);
+  const rounded = ((micro < 0n ? -micro : micro) + step / 2n) / step;
+  const whole = (rounded / unit).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${micro < 0n && rounded > 0n ? "-" : ""}$${whole}${places > 0 ? `.${(rounded % unit).toString().padStart(places, "0")}` : ""}`;
+}
+
+export const price = (micro: bigint): string => fixed(micro, 4);
+
+export const amount = (micro: bigint): string => fixed(micro, micro !== 0n && micro > -1_000_000n && micro < 1_000_000n ? 4 : 2);
+
+export const tick = (micro: bigint): string => price(micro).replace("$", "");
+
 export function fundingPercent(perHour: bigint): string {
   const negative = perHour < 0n;
   const steps = (negative ? -perHour : perHour) / 1_000_000_000_000n;

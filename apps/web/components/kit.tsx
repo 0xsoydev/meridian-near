@@ -1,14 +1,15 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, type LucideIcon } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 
 export const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+export const NIL = "—";
 export const PAGE = "mx-auto flex w-full max-w-[1120px] flex-col gap-12 px-4 py-10 lg:px-6 lg:py-14";
 export const LINK = `underline decoration-line underline-offset-[5px] transition-[text-decoration-color] duration-200 ease-brand hover:decoration-accent ${FOCUS}`;
 const BOX = `inline-flex h-10 shrink-0 items-center justify-center gap-1.5 border border-control bg-white text-[13px] transition-[background-color,scale] duration-150 ease-brand enabled:hover:bg-hover enabled:active:scale-[0.96] disabled:cursor-not-allowed disabled:text-muted ${FOCUS}`;
 export const SECONDARY = `${BOX} px-3 text-ink`;
 export const DANGER = `${BOX} px-3 text-down`;
 export const ICON = `${BOX} w-10 text-ink`;
-export const CHIP = `inline-flex h-8 min-w-0 flex-1 items-center justify-center border border-line bg-white text-[12px] tabular-nums text-ink transition-[background-color,border-color,scale] duration-150 ease-brand enabled:hover:bg-hover enabled:active:scale-[0.96] disabled:cursor-not-allowed disabled:text-muted aria-pressed:border-ink aria-pressed:bg-hover ${FOCUS}`;
+export const SMALL = `inline-flex h-8 shrink-0 items-center justify-center border border-control bg-white px-2.5 text-[12px] text-ink transition-[background-color,scale] duration-150 ease-brand enabled:hover:bg-hover enabled:active:scale-[0.96] disabled:cursor-not-allowed disabled:text-muted ${FOCUS}`;
 const FIELD =
   "w-full border border-control bg-white text-ink placeholder:text-muted disabled:bg-hover focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-accent";
 export const INPUT = `${FIELD} h-11 px-3 text-[16px] tabular-nums lg:text-[14px]`;
@@ -64,23 +65,23 @@ export function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
+type Choice<T extends string> = { value: T; label: string; tone?: "up" | "down"; hotkey?: string };
+
 export function Toggle<T extends string>({
   label,
   value,
   onChange,
   items,
-  big = false,
   className = "",
 }: {
   label: string;
   value: T;
   onChange: (value: T) => void;
-  items: ReadonlyArray<{ value: T; label: string; tone?: "up" | "down"; hotkey?: string }>;
-  big?: boolean;
+  items: ReadonlyArray<Choice<T>>;
   className?: string;
 }) {
   return (
-    <div role="group" aria-label={label} className={`flex items-center ${big ? "gap-7" : "gap-5"} ${className}`}>
+    <div role="group" aria-label={label} className={`flex items-center gap-5 ${className}`}>
       {items.map((item) => {
         const active = item.value === value;
         const on =
@@ -96,7 +97,7 @@ export function Toggle<T extends string>({
             aria-pressed={active}
             aria-keyshortcuts={item.hotkey}
             onClick={() => onChange(item.value)}
-            className={`${big ? "text-[16px]" : "text-[13px]"} inline-flex h-10 items-center gap-2 whitespace-nowrap transition-[color] duration-200 ease-brand ${FOCUS} ${
+            className={`inline-flex h-10 items-center gap-2 whitespace-nowrap text-[13px] transition-[color] duration-200 ease-brand ${FOCUS} ${
               active ? on : "text-muted decoration-transparent hover:text-ink"
             }`}
           >
@@ -115,6 +116,57 @@ export function Toggle<T extends string>({
   );
 }
 
+export function Segmented<T extends string>({
+  label,
+  value,
+  onChange,
+  items,
+  className = "",
+}: {
+  label: string;
+  value: T;
+  onChange: (value: T) => void;
+  items: ReadonlyArray<Choice<T>>;
+  className?: string;
+}) {
+  const at = Math.max(0, items.findIndex((item) => item.value === value));
+  const tone = items[at]?.tone;
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className={`relative grid h-11 border border-control bg-white p-[3px] ${className}`}
+      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+    >
+      <span
+        aria-hidden
+        className={`absolute inset-y-[3px] left-[3px] transition-[translate,background-color] duration-200 ease-brand motion-reduce:transition-none ${
+          tone === "up" ? "bg-up" : tone === "down" ? "bg-down" : "bg-ink"
+        }`}
+        style={{ width: `calc((100% - 6px) / ${items.length})`, translate: `${at * 100}%` }}
+      />
+      {items.map((item) => {
+        const active = item.value === value;
+        const hover = item.tone === "up" ? "hover:text-up" : item.tone === "down" ? "hover:text-down" : "hover:text-ink";
+        return (
+          <button
+            key={item.value}
+            type="button"
+            aria-pressed={active}
+            aria-keyshortcuts={item.hotkey}
+            onClick={() => onChange(item.value)}
+            className={`relative whitespace-nowrap text-[14px] tabular-nums transition-[color,background-color] duration-200 ease-brand ${FOCUS} ${
+              active ? "text-white" : `text-muted hover:bg-hover ${hover}`
+            }`}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function MobileTabs<T extends string>({
   value,
   onChange,
@@ -122,7 +174,7 @@ export function MobileTabs<T extends string>({
 }: {
   value: T;
   onChange: (value: T) => void;
-  items: ReadonlyArray<{ value: T; label: string }>;
+  items: ReadonlyArray<{ value: T; label: string; icon: LucideIcon }>;
 }) {
   return (
     <div
@@ -139,10 +191,11 @@ export function MobileTabs<T extends string>({
             type="button"
             aria-pressed={active}
             onClick={() => onChange(item.value)}
-            className={`h-[52px] text-[14px] transition-[color,box-shadow] duration-200 ease-brand ${FOCUS} ${
+            className={`flex h-[52px] flex-col items-center justify-center gap-1 text-[12px] leading-4 transition-[color,box-shadow] duration-200 ease-brand ${FOCUS} ${
               active ? "text-ink shadow-[inset_0_2px_0_var(--color-accent)]" : "text-muted"
             }`}
           >
+            <item.icon aria-hidden className="size-4" />
             {item.label}
           </button>
         );
@@ -271,18 +324,22 @@ export function PageHeader({ title, aside, children }: { title: string; aside?: 
 export function Stat({
   label,
   tone,
+  big = false,
   className = "",
   children,
 }: {
   label: string;
   tone?: "up" | "down" | undefined;
+  big?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   return (
     <div className={`flex min-w-0 flex-col gap-0.5 lg:shrink-0 ${className}`}>
       <dt className="truncate text-[12px] text-muted">{label}</dt>
-      <dd className={`truncate text-[13px] tabular-nums ${tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-ink"}`}>
+      <dd
+        className={`truncate tabular-nums ${big ? "text-[20px] leading-[24px]" : "text-[13px]"} ${tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-ink"}`}
+      >
         {children}
       </dd>
     </div>
@@ -339,7 +396,7 @@ export function Table({
           <tr>
             {columns.map((column, index) => (
               <th key={`${column.label}-${index}`} scope="col" className={`${TH} ${column.end ? "text-right" : "text-left"}`}>
-                {column.label}
+                {column.label || <span className="sr-only">Actions</span>}
               </th>
             ))}
           </tr>

@@ -7,6 +7,7 @@ import {
   HistogramSeries,
   LineStyle,
   createChart,
+  type AutoscaleInfoProvider,
   type IChartApi,
   type ISeriesApi,
 } from "lightweight-charts";
@@ -88,6 +89,14 @@ export function CandleChart({ points, bucket, empty }: { points: ChartPoint[]; b
       priceLineStyle: LineStyle.Dashed,
       priceLineWidth: 1,
       priceFormat,
+      autoscaleInfoProvider: ((base) => {
+        const info = base();
+        if (!info?.priceRange) return info;
+        const { minValue, maxValue } = info.priceRange;
+        const mid = (minValue + maxValue) / 2;
+        const half = Math.max((maxValue - minValue) / 2, mid * 0.02);
+        return { ...info, priceRange: { minValue: mid - half, maxValue: mid + half } };
+      }) satisfies AutoscaleInfoProvider,
     });
     const volume = chart.addSeries(HistogramSeries, {
       priceScaleId: "",

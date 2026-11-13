@@ -1,36 +1,37 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { ArrowLeftRight, ChartCandlestick, ListOrdered, Wallet } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CHIP,
   CommitButton,
   Empty,
   FOCUS,
-  Field,
-  INPUT,
-  INPUT_SM,
   LINK,
   Line,
   MarketSelect,
   MobileTabs,
+  NIL,
   ROW,
   SECONDARY,
+  SMALL,
+  Segmented,
   Stat,
   TD,
   Table,
   Toggle,
 } from "../../../components/kit";
 import { Shortcuts } from "../../../components/shortcuts";
-import { KEY_STORAGE, api, percent, railName, shortKey, usd } from "../../../lib/client";
+import { Amount, Portion } from "../../../components/ticket";
+import { KEY_STORAGE, amount, api, percent, price, railName, shortKey, tick, usd } from "../../../lib/client";
 import { MARKETS } from "../../../lib/markets";
-import { charge, fillsToPoints, formatMicroPerMtok, formatMtok, parseMtok, parseUsd, sellerEarning, stampFormat } from "../../../lib/price";
+import { charge, dayChange, fillsToPoints, formatMtok, parseMtok, parseUsd, sellerEarning, stampFormat } from "../../../lib/price";
 import { quoteTicket, type Level } from "../../../lib/ticket";
 import type { Bid, BlockedAction, Book, Holding, KeyFill, Me, ModelRow, Offer, VenueStatus } from "../../../lib/types";
 import {
   anything,
   bidsSchema,
   bookSchema,
+  createKeySchema,
   fillsSchema,
   holdingsSchema,
   meSchema,
@@ -39,15 +40,17 @@ import {
   sellResultSchema,
   statusSchema,
   tradeResultSchema,
+  walletSchema,
 } from "../../../lib/wire";
+import { useNear } from "../providers";
 import { CandleChart, ChartCredit, INTERVALS, type Interval } from "./chart";
 import { OrderBook } from "./order-book";
 
+const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
 const TAKE_BPS = 1000n;
 const BOOK_MS = 5_000;
 const ACCOUNT_MS = 15_000;
 const STATUS_MS = 30_000;
-const PRESETS = [25n, 50n, 75n, 100n] as const;
 
 type Side = "buy" | "sell";
 type Mode = "market" | "limit";
@@ -55,7 +58,7 @@ type Panel = "chart" | "book" | "trade" | "account";
 type View = "balances" | "holdings" | "orders" | "history";
 type Account = { me: Me; holdings: Holding[]; bids: Bid[]; offers: Offer[]; fills: KeyFill[] };
 type Notice = { tone: "up" | "down"; text: string; fix: { url: string; label: string } | null };
-type Problem = { field: "size" | "limit" | "key"; text: string };
+type Problem = { field: "size" | "limit" | "key" | "daily"; text: string };
 type Order = { id: string; kind: "bid" | "offer"; model: string; price: bigint; tokens: bigint; value: bigint; at: string };
 
 const sum = (values: ReadonlyArray<string>) => values.reduce((total, value) => total + BigInt(value), 0n);
@@ -99,6 +102,7 @@ function Balance({ label, value, note }: { label: string; value: string; note: s
 }
 
 export default function TradePage() {
+  const { accountId, connect, sign, send } = useNear();
   const [models, setModels] = useState<ModelRow[]>([]);
   const [status, setStatus] = useState<VenueStatus | null>(null);
   const [model, setModel] = useState("");
@@ -118,10 +122,14 @@ export default function TradePage() {
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>("chart");
   const [view, setView] = useState<View>("balances");
+  const [pasting, setPasting] = useState(false);
+  const [daily, setDaily] = useState("5");
+  const [wallet, setWallet] = useState<bigint | null>(null);
   const current = useRef("");
   const sizeRef = useRef<HTMLInputElement | null>(null);
   const limitRef = useRef<HTMLInputElement | null>(null);
   const keyRef = useRef<HTMLInputElement | null>(null);
+  const dailyRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -199,6 +207,17 @@ export default function TradePage() {
   }, [key]);
 
   useEffect(() => {
+    if (!accountId || key) return;
+    let live = true;
+    void api(`/api/v1/wallet?account=${encodeURIComponent(accountId)}`, walletSchema).then((result) => {
+      if (live) setWallet(result.ok ? BigInt(result.data.wallet_usd_micro) : null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [accountId, key]);
+
+  useEffect(() => {
     void readAccount();
     if (!key) return;
     const id = window.setInterval(() => void readAccount(), ACCOUNT_MS);
@@ -219,6 +238,7 @@ export default function TradePage() {
     [book],
   );
   const points = useMemo(() => fillsToPoints(book?.fills ?? []), [book]);
+  const change = dayChange(points, Date.now() / 1000);
   const groups = useMemo(() => {
     const listed = models.filter((entry) => entry.available_tokens !== "0").map((entry) => entry.id).sort();
     const rest = models.filter((entry) => entry.available_tokens === "0").map((entry) => entry.id).sort();
@@ -243,7 +263,6 @@ export default function TradePage() {
   const limitPrice = mode === "limit" ? parseUsd(limit) : null;
   const { preview, resting, restingValue, max } = quoteTicket({ side, mode, asks, bids, tokens, limit: limitPrice, budget, held, takeBps: TAKE_BPS });
   const share = max > 0n ? Number(smaller(100n, (tokens * 100n) / max)) : 0;
-  const fill: CSSProperties & Record<"--fill", string> = { "--fill": `${share}%` };
   const holdings = account?.holdings ?? [];
   const orders: Order[] = [
     ...(account?.bids ?? []).map((bid) => ({
@@ -277,7 +296,7 @@ export default function TradePage() {
     setMode(next);
     setProblem(null);
     const anchor = side === "buy" ? (bestAsk ?? bestBid) : (bestBid ?? bestAsk);
-    if (next === "limit" && limit === "" && anchor !== null) setLimit(formatMicroPerMtok(anchor));
+    if (next === "limit" && limit === "" && anchor !== null) setLimit(tick(anchor));
   };
 
   const chooseSide = (next: Side) => {
@@ -289,7 +308,7 @@ export default function TradePage() {
   const flag = (field: Problem["field"], text: string) => {
     setProblem({ field, text });
     setPanel("trade");
-    (field === "size" ? sizeRef : field === "limit" ? limitRef : keyRef).current?.focus();
+    ({ size: sizeRef, limit: limitRef, key: keyRef, daily: dailyRef })[field].current?.focus();
   };
 
   const saveKey = () => {
@@ -312,13 +331,55 @@ export default function TradePage() {
     setNotice(null);
   };
 
+  const createKey = async () => {
+    const perDay = parseUsd(daily);
+    if (perDay === null || perDay === 0n) return flag("daily", "Enter how much it may spend per day, like 5.");
+    setProblem(null);
+    setBusy(true);
+    const signed = await sign("create_key");
+    if (!signed) {
+      setBusy(false);
+      setNotice({ tone: "down", text: "The wallet didn't sign, so no key was created.", fix: null });
+      return;
+    }
+    const made = await api("/api/v1/keys", createKeySchema, { method: "POST", body: JSON.stringify(signed) });
+    if (!made.ok) {
+      setBusy(false);
+      setNotice({ tone: "down", text: made.message, fix: null });
+      return;
+    }
+    localStorage.setItem(KEY_STORAGE, made.data.key);
+    setKey(made.data.key);
+    const sent = await send([
+      {
+        receiverId: CORE,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: { methodName: "set_cap", args: { key: made.data.key_id, per_day: perDay.toString() }, gas: "30000000000000", deposit: "1" },
+          },
+        ],
+      },
+    ]);
+    setBusy(false);
+    setNotice(
+      "hashes" in sent
+        ? { tone: "up", text: `Trading is set up. This browser can spend up to ${usd(perDay)} a day from your wallet.`, fix: null }
+        : { tone: "down", text: "The router key is saved here, but its daily limit wasn't set, so it can't spend from your wallet yet.", fix: { url: "/wallet", label: "Set it on the Wallet page" } },
+    );
+  };
+
   const submit = async () => {
     setNotice(null);
-    if (!key) return flag("key", "Paste a router key first.");
+    if (!key) {
+      if (pasting) return saveKey();
+      if (!accountId) return void (await connect());
+      return createKey();
+    }
     if (tokens <= 0n) return flag("size", "Enter a size above 0 MTok.");
     if (mode === "limit" && (limitPrice === null || limitPrice <= 0n)) return flag("limit", "Enter a price in USD per MTok, like 0.18.");
     if (mode === "limit" && limitPrice !== null && ceiling !== null && limitPrice > ceiling) {
-      return flag("limit", `The limit can't sit above the ${usd(ceiling)} list price.`);
+      return flag("limit", `The limit can't sit above the ${price(ceiling)} list price.`);
     }
     if (side === "sell" && tokens > held) {
       return flag("size", held === 0n ? `You hold no ${model} MTok to sell.` : `You hold ${formatMtok(held)} MTok of ${model}.`);
@@ -346,7 +407,7 @@ export default function TradePage() {
           tone: "up",
           text: [
             bought > 0n ? `Bought ${formatMtok(bought)} MTok for ${usd(paid)}.` : "",
-            bid ? `A bid for ${formatMtok(BigInt(bid.tokens))} MTok rests at ${usd(BigInt(bid.price_micro_per_mtok))}.` : "",
+            bid ? `A bid for ${formatMtok(BigInt(bid.tokens))} MTok rests at ${price(BigInt(bid.price_micro_per_mtok))}.` : "",
           ]
             .filter(Boolean)
             .join(" "),
@@ -365,7 +426,7 @@ export default function TradePage() {
           tone: "up",
           text: [
             sold > 0n ? `Sold ${formatMtok(sold)} MTok for ${usd(sellerEarning(gross, TAKE_BPS))} after the fee.` : "",
-            offered > 0n && limitPrice !== null ? `${formatMtok(offered)} MTok rests as an offer at ${usd(limitPrice)}.` : "",
+            offered > 0n && limitPrice !== null ? `${formatMtok(offered)} MTok rests as an offer at ${price(limitPrice)}.` : "",
           ]
             .filter(Boolean)
             .join(" "),
@@ -386,7 +447,7 @@ export default function TradePage() {
     setCancelling(null);
     setNotice(
       result.ok
-        ? { tone: "up", text: `Cancelled the ${order.kind} for ${formatMtok(order.tokens)} MTok at ${usd(order.price)}.`, fix: null }
+        ? { tone: "up", text: `Cancelled the ${order.kind} for ${formatMtok(order.tokens)} MTok at ${price(order.price)}.`, fix: null }
         : { tone: "down", text: result.message, fix: null },
     );
     readBook();
@@ -417,26 +478,56 @@ export default function TradePage() {
     },
   ];
 
+  const summary = (
+    <dl className="flex flex-col gap-1.5">
+      <Line label="Average price">{preview.fillable === 0n ? NIL : price(preview.avg)}</Line>
+      {mode === "limit" || preview.partial ? (
+        <Line label={side === "buy" ? "Fills now" : "Sells now"}>{formatMtok(preview.fillable)} MTok</Line>
+      ) : null}
+      {resting > 0n && limitPrice !== null ? (
+        <Line label={side === "buy" ? "Rests as a bid" : "Rests as an offer"}>
+          {formatMtok(resting)} MTok at {price(limitPrice)}
+        </Line>
+      ) : null}
+      {side === "buy" ? (
+        <Line label="You pay">{amount(preview.cost + restingValue)}</Line>
+      ) : resting > 0n ? (
+        <>
+          <Line label="You receive now">{amount(preview.net)}</Line>
+          <Line label="When the offer fills">{amount(sellerEarning(restingValue, TAKE_BPS))}</Line>
+        </>
+      ) : (
+        <>
+          <Line label="Fee (10%)">{amount(preview.fee)}</Line>
+          <Line label="You receive">{amount(preview.net)}</Line>
+        </>
+      )}
+    </dl>
+  );
+
   return (
     <div className="flex flex-col pb-[52px] lg:pb-0">
       <h1 className="sr-only">Trade {model || "MTokens"}</h1>
       <div className="flex flex-col gap-3 border-b border-line px-4 py-3 lg:h-16 lg:flex-row lg:items-center lg:gap-10 lg:px-6 lg:py-0">
         <MarketSelect value={model} onChange={pick} groups={groups} />
         <dl className="grid min-w-0 grid-cols-3 gap-x-4 gap-y-2 lg:flex lg:gap-8 lg:overflow-x-auto">
-          <Stat label="Best ask">
-            <Ticker value={bestAsk === null ? "None" : usd(bestAsk)} />
+          <Stat label="Best ask" big>
+            <Ticker value={bestAsk === null ? NIL : price(bestAsk)} />
+          </Stat>
+          <Stat label="24h change" tone={change === null || change === 0 ? undefined : change > 0 ? "up" : "down"}>
+            {change === null ? NIL : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
           </Stat>
           <Stat label="Best bid">
-            <Ticker value={bestBid === null ? "None" : usd(bestBid)} />
+            <Ticker value={bestBid === null ? NIL : price(bestBid)} />
           </Stat>
           {perp ? (
-            <Stat label="Index">
-              <Ticker value={index === null ? "Not posted" : usd(BigInt(index))} />
+            <Stat label="Index" className="max-lg:hidden">
+              <Ticker value={index === null ? "Not posted" : price(BigInt(index))} />
             </Stat>
           ) : null}
-          <Stat label="List price">{listPrice === null ? "Unknown" : usd(listPrice)}</Stat>
+          <Stat label="List price">{listPrice === null ? NIL : price(listPrice)}</Stat>
           <Stat label="Vs list" tone={bestAsk !== null && listPrice !== null && bestAsk < listPrice ? "up" : undefined}>
-            {bestAsk === null || listPrice === null || listPrice === 0n ? "No asks" : percent(bestAsk - listPrice, listPrice)}
+            {bestAsk === null || listPrice === null || listPrice === 0n ? NIL : percent(bestAsk - listPrice, listPrice)}
           </Stat>
           <Stat label="Available">{formatMtok(depth)} MTok</Stat>
           <Stat label="Sold by" className="hidden lg:flex">
@@ -453,7 +544,7 @@ export default function TradePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:h-[max(560px,calc(100svh_-_260px))] lg:grid-cols-[minmax(0,1fr)_256px_280px] xl:grid-cols-[minmax(0,1fr)_280px_300px]">
+      <div className="grid grid-cols-1 lg:h-[max(640px,calc(100svh_-_157px))] lg:grid-cols-[minmax(0,1fr)_256px_280px] lg:grid-rows-[minmax(0,1fr)_240px] xl:grid-cols-[minmax(0,1fr)_280px_300px]">
         <section
           aria-label="Price chart"
           className={`${panel === "chart" ? "flex" : "hidden"} h-[calc(100svh-17rem)] min-h-[360px] flex-col lg:flex lg:h-auto lg:min-h-0 lg:border-r lg:border-line`}
@@ -463,7 +554,7 @@ export default function TradePage() {
             <div className="flex items-center gap-4">
               {lastFill !== null ? (
                 <span className="whitespace-nowrap text-[12px] tabular-nums text-muted">
-                  Last fill <span className="text-ink">{usd(lastFill)}</span>
+                  Last fill <span className="text-ink">{price(lastFill)}</span>
                 </span>
               ) : null}
               <ChartCredit />
@@ -481,14 +572,14 @@ export default function TradePage() {
             book={book}
             onPrice={(price) => {
               setMode("limit");
-              setLimit(formatMicroPerMtok(price));
+              setLimit(tick(price));
               setProblem(null);
               setPanel("trade");
             }}
           />
         </div>
 
-        <section aria-label="Order ticket" className={`${panel === "trade" ? "flex" : "hidden"} min-h-0 flex-col lg:flex`}>
+        <section aria-label="Order ticket" className={`${panel === "trade" ? "flex" : "hidden"} min-h-0 flex-col lg:col-[3] lg:row-[1/3] lg:flex`}>
           <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
             <Toggle
               label="Order type"
@@ -518,160 +609,159 @@ export default function TradePage() {
               event.preventDefault();
               void submit();
             }}
-            className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 *:shrink-0"
+            className="flex min-h-0 flex-1 flex-col lg:overflow-y-auto lg:[scrollbar-width:thin]"
           >
-            <Toggle
-              big
-              label="Side"
-              value={side}
-              onChange={chooseSide}
-              items={[
-                { value: "buy", label: "Buy", tone: "up", hotkey: "B" },
-                { value: "sell", label: "Sell", tone: "down", hotkey: "S" },
-              ]}
-            />
-            {key ? (
-              accountError ? (
-                <p className="text-[12px] leading-[18px] text-down">{accountError}</p>
-              ) : (
+            <div className="flex flex-col gap-3 p-4 *:shrink-0">
+              <Segmented
+                label="Side"
+                value={side}
+                onChange={chooseSide}
+                items={[
+                  { value: "buy", label: "Buy", tone: "up", hotkey: "B" },
+                  { value: "sell", label: "Sell", tone: "down", hotkey: "S" },
+                ]}
+              />
+              {key ? (
+                accountError ? (
+                  <p className="text-[12px] leading-[18px] text-down">{accountError}</p>
+                ) : (
+                  <dl className="flex flex-col gap-1.5">
+                    {side === "buy" ? (
+                      <Line label="Available">{budget === null ? "Reading" : usd(budget)}</Line>
+                    ) : (
+                      <Line label="Best bid">{bestBid === null ? NIL : price(bestBid)}</Line>
+                    )}
+                    <Line label="Holding">{account ? `${formatMtok(held)} MTok` : "Reading"}</Line>
+                  </dl>
+                )
+              ) : accountId ? (
                 <dl className="flex flex-col gap-1.5">
-                  {side === "buy" ? (
-                    <Line label="Spendable today">{budget === null ? "Reading" : usd(budget)}</Line>
-                  ) : (
-                    <Line label="Best bid">{bestBid === null ? "None" : usd(bestBid)}</Line>
-                  )}
-                  <Line label="Holding">{account ? `${formatMtok(held)} MTok` : "Reading"}</Line>
+                  <Line label="Wallet">{wallet === null ? "Reading" : usd(wallet)}</Line>
                 </dl>
-              )
-            ) : (
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-end gap-2">
-                  <Field label="Router key" className="min-w-0 flex-1">
-                    <input
-                      ref={keyRef}
-                      type="password"
-                      value={draftKey}
-                      onChange={(event) => setDraftKey(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter") return;
-                        event.preventDefault();
-                        saveKey();
-                      }}
-                      placeholder="rk_"
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-invalid={problem?.field === "key"}
-                      className={INPUT_SM}
-                    />
-                  </Field>
-                  <button type="button" onClick={saveKey} className={SECONDARY}>
-                    Use key
-                  </button>
+              ) : null}
+              {key ? null : pasting ? (
+                <Amount
+                  ref={keyRef}
+                  label="Router key"
+                  type="password"
+                  value={draftKey}
+                  onChange={(event) => setDraftKey(event.target.value)}
+                  placeholder="rk_"
+                  autoComplete="off"
+                  spellCheck={false}
+                  alert={problem?.field === "key"}
+                  note={problem?.field === "key" ? problem.text : "A key from the Wallet page. It stays in this browser."}
+                />
+              ) : accountId ? (
+                <div className="flex flex-col gap-3 border border-line bg-wash p-3">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-[13px] text-ink">Set up trading</p>
+                    <p className="text-pretty text-[12px] leading-[18px] text-muted">
+                      Once per browser: a router key that pays from your wallet, never more than you allow in a day.
+                    </p>
+                  </div>
+                  <Amount
+                    ref={dailyRef}
+                    label="Spend per day"
+                    unit="USDC"
+                    value={daily}
+                    onChange={(event) => setDaily(event.target.value)}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    alert={problem?.field === "daily"}
+                    note={problem?.field === "daily" ? problem.text : undefined}
+                  />
                 </div>
-                <p className={`text-[12px] leading-[18px] ${problem?.field === "key" ? "text-down" : "text-muted"}`}>
-                  {problem?.field === "key" ? `${problem.text} ` : ""}
-                  Create one on the{" "}
-                  <Link href="/wallet" className={LINK}>
-                    Wallet
-                  </Link>{" "}
-                  page.
-                </p>
-              </div>
-            )}
-            {mode === "limit" ? (
-              <Field
-                label="Limit price (USD per MTok)"
-                alert={problem?.field === "limit"}
-                note={problem?.field === "limit" ? problem.text : ceiling !== null ? `Ceiling ${usd(ceiling)}, the highest list price` : undefined}
-              >
-                <input
+              ) : null}
+              {mode === "limit" ? (
+                <Amount
                   ref={limitRef}
+                  label="Limit price"
+                  unit="USD/MTok"
                   value={limit}
                   onChange={(event) => setLimit(event.target.value)}
                   inputMode="decimal"
                   autoComplete="off"
-                  aria-invalid={problem?.field === "limit"}
-                  className={INPUT}
+                  alert={problem?.field === "limit"}
+                  note={problem?.field === "limit" ? problem.text : ceiling !== null ? `Ceiling ${price(ceiling)}, the highest list price` : undefined}
                 />
-              </Field>
-            ) : null}
-            <Field label="Size (MTok)" alert={problem?.field === "size"} note={problem?.field === "size" ? problem.text : undefined}>
-              <input
+              ) : null}
+              <Amount
                 ref={sizeRef}
+                label="Size"
+                unit="MTok"
                 value={size}
                 onChange={(event) => setSize(event.target.value)}
                 inputMode="decimal"
                 autoComplete="off"
-                aria-invalid={problem?.field === "size"}
                 aria-keyshortcuts="/"
-                className={INPUT}
+                alert={problem?.field === "size"}
+                note={problem?.field === "size" ? problem.text : undefined}
               />
-            </Field>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={share}
-                disabled={max === 0n}
-                aria-label="Size as a share of the most you can trade"
-                onChange={(event) => setSize(sizeText((max * BigInt(event.target.value)) / 100n))}
-                style={fill}
-                className={`range h-5 min-w-0 flex-1 ${FOCUS}`}
-              />
-              <span className="w-10 text-right text-[12px] tabular-nums text-muted">{share}%</span>
+              {max > 0n ? (
+                <Portion
+                  value={share}
+                  label={side === "buy" ? (key ? "Size as a share of what you can buy" : "Size as a share of the asks") : "Size as a share of what you hold"}
+                  onChange={(percent) => setSize(sizeText((max * BigInt(percent)) / 100n))}
+                />
+              ) : null}
+              <div className="border-t border-line pt-3 lg:hidden">{summary}</div>
+              {key ? (
+                <p className="text-[12px] leading-[18px] text-muted">
+                  {side === "buy"
+                    ? "Paid from the key's balance first, then your wallet within today's limit."
+                    : "Proceeds go to the key's balance, minus the 10% venue fee."}
+                </p>
+              ) : null}
             </div>
-            <div role="group" aria-label="Size presets" className="flex gap-1.5">
-              {PRESETS.map((part) => (
-                <button key={part.toString()} type="button" disabled={max === 0n} onClick={() => setSize(sizeText((max * part) / 100n))} className={CHIP}>
-                  {part === 100n ? "Max" : `${part}%`}
+            <div className="sticky bottom-[52px] z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 lg:bottom-0 lg:pb-4">
+              <div className="hidden lg:block">{summary}</div>
+              <CommitButton type="submit" tone={!key ? "ink" : side === "buy" ? "up" : "down"} disabled={busy} aria-busy={busy} className="w-full">
+                {busy
+                  ? key
+                    ? side === "buy"
+                      ? "Buying"
+                      : "Selling"
+                    : "Waiting for the wallet"
+                  : key
+                    ? `${side === "buy" ? "Buy" : "Sell"} ${sizeText(tokens)} MTok`
+                    : pasting
+                      ? "Use this key"
+                      : accountId
+                        ? "Set up trading"
+                        : "Connect wallet to trade"}
+              </CommitButton>
+              {!key ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasting(!pasting);
+                    setProblem(null);
+                  }}
+                  className={`${LINK} self-center text-[13px] text-ink`}
+                >
+                  {pasting ? (accountId ? "Set up with my wallet instead" : "Connect a wallet instead") : "Use a router key I already have"}
                 </button>
-              ))}
+              ) : null}
+              {notice ? (
+                <p role="status" className={`text-[13px] leading-[20px] ${notice.tone === "up" ? "text-up" : "text-down"}`}>
+                  {notice.text}{" "}
+                  {notice.fix ? (
+                    <a href={notice.fix.url} className={LINK}>
+                      {notice.fix.label}
+                    </a>
+                  ) : null}
+                </p>
+              ) : null}
             </div>
-            <dl className="flex flex-col gap-1.5 border-t border-line pt-3">
-              <Line label="Average price">{preview.fillable === 0n ? "None" : usd(preview.avg)}</Line>
-              {mode === "limit" || preview.partial ? (
-                <Line label={side === "buy" ? "Fills now" : "Sells now"}>{formatMtok(preview.fillable)} MTok</Line>
-              ) : null}
-              {resting > 0n && limitPrice !== null ? (
-                <Line label={side === "buy" ? "Rests as a bid" : "Rests as an offer"}>
-                  {formatMtok(resting)} MTok at {usd(limitPrice)}
-                </Line>
-              ) : null}
-              {side === "buy" ? (
-                <Line label="Total">{usd(preview.cost + restingValue)}</Line>
-              ) : (
-                <>
-                  <Line label="Venue fee (10%)">{usd(preview.fee)}</Line>
-                  <Line label="You receive">{usd(preview.net)}</Line>
-                </>
-              )}
-            </dl>
-            <CommitButton type="submit" tone={!key ? "ink" : side === "buy" ? "up" : "down"} disabled={busy} aria-busy={busy} className="mt-2 w-full">
-              {busy ? (side === "buy" ? "Buying" : "Selling") : key ? `${side === "buy" ? "Buy" : "Sell"} ${sizeText(tokens)} MTok` : `Add a key to ${side}`}
-            </CommitButton>
-            {notice ? (
-              <p role="status" className={`text-[13px] leading-[20px] ${notice.tone === "up" ? "text-up" : "text-down"}`}>
-                {notice.text}{" "}
-                {notice.fix ? (
-                  <a href={notice.fix.url} className={LINK}>
-                    {notice.fix.label}
-                  </a>
-                ) : null}
-              </p>
-            ) : null}
-            <p className="text-[12px] leading-[18px] text-muted">
-              {side === "buy"
-                ? "Paid from the key's balance first, then your wallet within today's limit."
-                : "Proceeds go to the key's balance, minus the 10% venue fee."}
-            </p>
           </form>
         </section>
-      </div>
 
-      <section aria-label="Your account" className={`${panel === "account" ? "block" : "hidden"} border-t border-line lg:block`}>
-        <div className="flex h-10 items-center overflow-x-auto border-b border-line px-4">
+        <section
+          aria-label="Your account"
+          className={`${panel === "account" ? "flex" : "hidden"} min-h-0 flex-col border-t border-line lg:col-[1/3] lg:row-[2] lg:flex lg:border-r`}
+        >
+        <div className="flex h-10 shrink-0 items-center overflow-x-auto border-b border-line px-4">
           <Toggle
             label="Account view"
             value={view}
@@ -684,15 +774,26 @@ export default function TradePage() {
             ]}
           />
         </div>
-        {!account ? (
+        <div className="min-h-0 flex-1 lg:overflow-y-auto">
+        {!account && !key && accountId ? (
+          <dl>
+            <Balance
+              label="Wallet"
+              value={wallet === null ? "Reading" : usd(wallet)}
+              note="USDC on NEAR. Set up trading in the ticket to buy with it and see holdings and orders here."
+            />
+          </dl>
+        ) : !account ? (
           <Empty
             action={
-              <Link href="/wallet" className={SECONDARY}>
-                Create a key
-              </Link>
+              key || accountId ? null : (
+                <button type="button" onClick={() => void connect()} className={SECONDARY}>
+                  Connect wallet
+                </button>
+              )
             }
           >
-            {accountError ?? "Add a router key in the ticket to see your balances, holdings and orders here."}
+            {accountError ?? (key ? "Reading your account." : "Connect your wallet to see your balances, holdings and orders here.")}
           </Empty>
         ) : view === "balances" ? (
           <>
@@ -745,7 +846,7 @@ export default function TradePage() {
                   <td className={`${TD} text-right`}>{formatMtok(BigInt(holding.tokens))}</td>
                   <td className={`${TD} text-muted`}>{holding.expires_at ? stampFormat.format(new Date(holding.expires_at)) : "No expiry"}</td>
                   <td className={`${TD} text-right`}>
-                    <button type="button" onClick={() => sellHolding(holding)} className={SECONDARY}>
+                    <button type="button" onClick={() => sellHolding(holding)} className={SMALL}>
                       Sell
                     </button>
                   </td>
@@ -773,11 +874,11 @@ export default function TradePage() {
                   <td className={`${TD} text-muted`}>{stampFormat.format(new Date(order.at))}</td>
                   <td className={TD}>{order.model}</td>
                   <td className={`${TD} ${order.kind === "bid" ? "text-up" : "text-down"}`}>{order.kind === "bid" ? "Bid" : "Offer"}</td>
-                  <td className={`${TD} text-right`}>{usd(order.price)}</td>
+                  <td className={`${TD} text-right`}>{price(order.price)}</td>
                   <td className={`${TD} text-right`}>{formatMtok(order.tokens)}</td>
                   <td className={`${TD} text-right`}>{usd(order.value)}</td>
                   <td className={`${TD} text-right`}>
-                    <button type="button" disabled={cancelling === order.id} onClick={() => void cancel(order)} className={SECONDARY}>
+                    <button type="button" disabled={cancelling === order.id} onClick={() => void cancel(order)} className={SMALL}>
                       {cancelling === order.id ? "Cancelling" : "Cancel"}
                     </button>
                   </td>
@@ -803,23 +904,25 @@ export default function TradePage() {
                 <td className={`${TD} text-muted`}>{stampFormat.format(new Date(item.at))}</td>
                 <td className={TD}>{item.model}</td>
                 <td className={`${TD} ${item.side === "buy" ? "text-up" : "text-down"}`}>{item.side === "buy" ? "Buy" : "Sell"}</td>
-                <td className={`${TD} text-right`}>{usd(BigInt(item.price_micro_per_mtok))}</td>
+                <td className={`${TD} text-right`}>{price(BigInt(item.price_micro_per_mtok))}</td>
                 <td className={`${TD} text-right`}>{formatMtok(BigInt(item.tokens))}</td>
                 <td className={`${TD} text-right`}>{usd(BigInt(item.amount_usd_micro))}</td>
               </tr>
             ))}
           </Table>
         )}
+        </div>
       </section>
+      </div>
 
       <MobileTabs
         value={panel}
         onChange={setPanel}
         items={[
-          { value: "chart", label: "Chart" },
-          { value: "book", label: "Book" },
-          { value: "trade", label: "Trade" },
-          { value: "account", label: "Account" },
+          { value: "chart", label: "Chart", icon: ChartCandlestick },
+          { value: "book", label: "Book", icon: ListOrdered },
+          { value: "trade", label: "Trade", icon: ArrowLeftRight },
+          { value: "account", label: "Account", icon: Wallet },
         ]}
       />
     </div>

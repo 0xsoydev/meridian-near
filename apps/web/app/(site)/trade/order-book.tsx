@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Skeleton, Toggle } from "../../../components/kit";
-import { percent } from "../../../lib/client";
-import { clockFormat, formatMicroPerMtok, formatMtok } from "../../../lib/price";
+import { NIL, Skeleton, Toggle } from "../../../components/kit";
+import { percent, tick } from "../../../lib/client";
+import { clockFormat, formatMtok } from "../../../lib/price";
 import type { Book } from "../../../lib/types";
 
 const LEVELS = 12;
@@ -31,9 +31,20 @@ function Columns({ labels }: { labels: readonly [string, string, string] }) {
   );
 }
 
-function Row({ level, side, deepest, onPrice }: { level: Level; side: "ask" | "bid"; deepest: bigint; onPrice: (price: bigint) => void }) {
+function Row({
+  level,
+  price,
+  side,
+  deepest,
+  onPrice,
+}: {
+  level: Level;
+  price: string;
+  side: "ask" | "bid";
+  deepest: bigint;
+  onPrice: (price: bigint) => void;
+}) {
   const width = deepest === 0n ? 0 : Number((level.total * 1000n) / deepest) / 10;
-  const price = formatMicroPerMtok(level.price);
   return (
     <button
       type="button"
@@ -100,19 +111,29 @@ export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (pric
             ) : (
               asks
                 .toReversed()
-                .map((level) => <Row key={`ask-${level.price}`} level={level} side="ask" deepest={deepest} onPrice={onPrice} />)
+                .map((level) => (
+                  <Row key={`ask-${level.price}`} level={level} price={tick(level.price)} side="ask" deepest={deepest} onPrice={onPrice} />
+                ))
             )}
           </div>
-          <div className="grid h-7 shrink-0 grid-cols-3 items-center border-y border-line px-4 text-[12px] tabular-nums">
+          <div className="flex h-7 shrink-0 items-center justify-between gap-3 border-y border-line px-4 text-[12px] tabular-nums">
             <span className="text-muted">Spread</span>
-            <span className="text-right text-ink">{spread === null ? "None" : formatMicroPerMtok(spread)}</span>
-            <span className="text-right text-ink">{spread === null || bestAsk === null ? "" : percent(spread, bestAsk)}</span>
+            {spread === null || bestAsk === null ? (
+              <span className="text-muted">{NIL}</span>
+            ) : (
+              <span className="flex gap-3 text-ink">
+                {tick(spread)}
+                <span className="text-muted">{percent(spread, bestAsk)}</span>
+              </span>
+            )}
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
             {bids.length === 0 ? (
               <Missing>No bids</Missing>
             ) : (
-              bids.map((level) => <Row key={`bid-${level.price}`} level={level} side="bid" deepest={deepest} onPrice={onPrice} />)
+              bids.map((level) => (
+                <Row key={`bid-${level.price}`} level={level} price={tick(level.price)} side="bid" deepest={deepest} onPrice={onPrice} />
+              ))
             )}
           </div>
         </>
@@ -137,7 +158,7 @@ export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (pric
                     key={`${fill.listing_id}-${fill.created_at}-${index}`}
                     className="grid h-6 grid-cols-3 items-center px-4 text-[12px] tabular-nums"
                   >
-                    <span className={tone}>{formatMicroPerMtok(price)}</span>
+                    <span className={tone}>{tick(price)}</span>
                     <span className="text-right text-ink">{formatMtok(BigInt(fill.tokens))}</span>
                     <span className="text-right text-muted">{clockFormat.format(new Date(fill.created_at))}</span>
                   </li>

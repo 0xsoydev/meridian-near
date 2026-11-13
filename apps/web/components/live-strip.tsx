@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ago, api, usd } from "../lib/client";
+import { ago, api, price } from "../lib/client";
 import { formatMtok } from "../lib/price";
 import type { VenueStatus } from "../lib/types";
 import { statusSchema } from "../lib/wire";
@@ -40,7 +40,7 @@ export function LiveStrip() {
       aria-label="Venue status"
       className={`fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white px-4 lg:block lg:px-6 ${exchange ? "hidden" : "block"}`}
     >
-      <div className="flex h-9 items-center gap-x-6 overflow-hidden whitespace-nowrap text-[12px] tabular-nums text-muted">
+      <div className="flex h-9 items-center gap-x-6 overflow-hidden whitespace-nowrap text-[12px] tabular-nums text-muted max-lg:[mask-image:linear-gradient(to_right,black_75%,transparent)]">
         <span className="flex items-center gap-1.5 text-ink">
           <span aria-hidden className={`size-[7px] rounded-full ${keeperUp ? "bg-up" : "bg-down"}`} />
           {status === null
@@ -55,7 +55,7 @@ export function LiveStrip() {
           <span key={market.model} className={market.open ? "" : "hidden lg:inline"}>
             {market.model}{" "}
             <span className={market.open ? "text-ink" : ""}>
-              {market.index_micro_per_mtok ? usd(BigInt(market.index_micro_per_mtok)) : "no index"}
+              {market.index_micro_per_mtok ? price(BigInt(market.index_micro_per_mtok)) : "no index"}
             </span>
             {market.open ? "" : ", paused"}
           </span>
