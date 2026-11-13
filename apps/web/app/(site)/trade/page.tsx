@@ -8,7 +8,6 @@ import {
   FOCUS,
   LINK,
   Line,
-  MarketSelect,
   MobileTabs,
   NIL,
   Pair,
@@ -21,6 +20,7 @@ import {
   Table,
   Toggle,
 } from "../../../components/kit";
+import { MarketPicker } from "../../../components/market-picker";
 import { Shortcuts } from "../../../components/shortcuts";
 import { Amount, Portion } from "../../../components/ticket";
 import { KEY_STORAGE, amount, api, percent, places, price, railName, shortKey, tick, usd } from "../../../lib/client";
@@ -241,9 +241,14 @@ export default function TradePage() {
   const points = useMemo(() => fillsToPoints(book?.fills ?? []), [book]);
   const change = dayChange(points, Date.now() / 1000);
   const groups = useMemo(() => {
-    const listed = models.filter((entry) => entry.available_tokens !== "0").map((entry) => entry.id).sort();
-    const rest = models.filter((entry) => entry.available_tokens === "0").map((entry) => entry.id).sort();
-    if (model && !listed.includes(model) && !rest.includes(model)) rest.unshift(model);
+    const sorted = [...models].sort((a, b) => (a.id < b.id ? -1 : 1));
+    const row = (entry: ModelRow) => {
+      const ask = entry.best_ask_micro_per_mtok === null ? null : BigInt(entry.best_ask_micro_per_mtok);
+      return { id: entry.id, price: ask === null ? null : price(ask, places(ask, BigInt(entry.reference_blended_micro_per_mtok))) };
+    };
+    const listed = sorted.filter((entry) => entry.available_tokens !== "0").map(row);
+    const rest = sorted.filter((entry) => entry.available_tokens === "0").map(row);
+    if (model && !models.some((entry) => entry.id === model)) rest.unshift({ id: model, price: null });
     return [
       { label: "Listed", models: listed },
       { label: "No asks yet", models: rest },
@@ -531,7 +536,7 @@ export default function TradePage() {
     <div className="flex flex-col pb-[52px] lg:pb-0">
       <h1 className="sr-only">Trade {model || "MTokens"}</h1>
       <div className="flex flex-col gap-3 border-b border-line px-4 py-3 lg:h-16 lg:flex-row lg:items-center lg:gap-10 lg:px-6 lg:py-0">
-        <MarketSelect value={model} onChange={pick} groups={groups} />
+        <MarketPicker value={model} onChange={pick} groups={groups} />
         <dl className="grid min-w-0 grid-cols-3 gap-x-4 gap-y-2 lg:flex lg:gap-8 lg:overflow-x-auto">
           <Stat label="Best ask" big>
             <Ticker value={bestAsk === null ? NIL : at(bestAsk)} />
