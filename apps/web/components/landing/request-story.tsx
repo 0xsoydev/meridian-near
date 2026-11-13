@@ -242,7 +242,7 @@ export function RequestStory() {
                 }}
                 data-step={index}
                 aria-current={step === index ? "step" : undefined}
-                className={`flex min-h-[34vh] flex-col justify-center gap-2 border-l-2 pl-6 transition-[border-color] duration-300 ease-brand ${
+                className={`flex min-h-[26vh] flex-col justify-center gap-2 border-l-2 pl-6 transition-[border-color] duration-300 ease-brand ${
                   step === index ? "border-accent" : "border-line"
                 }`}
               >

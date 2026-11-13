@@ -2,7 +2,7 @@
 
 import { ChevronRight, Pause, Play, RotateCcw } from "lucide-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
-import { type ReactNode, type RefObject, useEffect, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { FOCUS, SECONDARY } from "../kit";
 
 export type Sequence = ReturnType<typeof useSequence>;
@@ -10,15 +10,19 @@ export type Sequence = ReturnType<typeof useSequence>;
 export function useSequence(ref: RefObject<Element | null>, holds: readonly number[]) {
   const last = holds.length - 1;
   const reduced = useReducedMotion();
+  const near = useInView(ref, { margin: "0px 0px 320px 0px" });
   const inView = useInView(ref, { amount: 0.35 });
-  const [step, setStep] = useState(0);
-  const [playing, setPlaying] = useState(true);
+  const primed = useRef(false);
+  const [step, setStep] = useState(last);
+  const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
-    if (!reduced) return;
-    setStep(last);
-    setPlaying(false);
-  }, [reduced, last]);
+    if (reduced || primed.current || !near) return;
+    primed.current = true;
+    if (inView) return;
+    setStep(0);
+    setPlaying(true);
+  }, [reduced, near, inView]);
 
   useEffect(() => {
     if (!playing || !inView) return;

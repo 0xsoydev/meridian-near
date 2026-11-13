@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, usd } from "../../lib/client";
+import { api, price as fmtPrice } from "../../lib/client";
 import { modelsSchema, statusSchema } from "../../lib/wire";
 import { FOCUS } from "../kit";
 import { CtaLink } from "./cta";
@@ -96,7 +96,7 @@ export function TradeCta({ className = "" }: { className?: string }) {
 export function LiveLine({ className = "" }: { className?: string }) {
   const { state } = useVenue();
   const top = state.kind === "ready" ? state.venue.markets[0] : undefined;
-  const price = top ? (top.ask ?? top.index) : null;
+  const price = top ? (top.index ?? top.ask) : null;
   const off = top && price !== null ? under(top.list, price) : 0;
   return (
     <p className={`min-h-6 text-[14px] leading-[22px] text-muted ${className}`}>
@@ -107,8 +107,8 @@ export function LiveLine({ className = "" }: { className?: string }) {
         >
           <span aria-hidden className="size-1.5 rounded-full bg-up" />
           <span>
-            Live: <span className="text-ink">{top.model}</span> {top.ask !== null ? "asks" : "trades at"}{" "}
-            <span className="tabular-nums text-ink">{usd(price)}</span> per MTok
+            Live: <span className="text-ink">{top.model}</span> {top.index !== null ? "index" : "asks"}{" "}
+            <span className="tabular-nums text-ink">{fmtPrice(price)}</span> per MTok
             {off > 0 ? `, ${off}% under list` : ""}
           </span>
         </Link>

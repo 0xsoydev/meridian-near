@@ -78,7 +78,8 @@ export function AgentsTerminal({ variant, host = "" }: { variant: "section" | "b
         src="/images/terminal-rays.webp"
         alt=""
         aria-hidden
-        loading="lazy"
+        loading="eager"
+        fetchPriority="low"
         width={1217}
         height={768}
         className="absolute inset-0 size-full object-cover object-bottom"
