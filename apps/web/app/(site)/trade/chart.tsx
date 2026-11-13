@@ -51,17 +51,17 @@ export type Level = { price: bigint; title: string; tone: "muted" | "up" | "down
 
 type Legend = { open: number; high: number; low: number; close: number; volume: number };
 
-const fixed4 = (value: number) => value.toFixed(4);
-
 export function CandleChart({
   points,
   bucket,
   empty,
+  precision = 4,
   levels = [],
 }: {
   points: ChartPoint[];
   bucket: number;
   empty: string;
+  precision?: number;
   levels?: ReadonlyArray<Level>;
 }) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -92,7 +92,7 @@ export function CandleChart({
         attributionLogo: false,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: "rgba(30, 30, 30, 0.06)" } },
-      rightPriceScale: { borderColor: line, scaleMargins: { top: 0.12, bottom: 0.24 } },
+      rightPriceScale: { borderColor: line, scaleMargins: { top: 0.12, bottom: 0.24 }, tickMarkDensity: 4, entireTextOnly: true },
       timeScale: { borderColor: line, timeVisible: true, secondsVisible: false, rightOffset: 6, barSpacing: 10 },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -109,6 +109,7 @@ export function CandleChart({
       priceLineColor: accent,
       priceLineStyle: LineStyle.Dashed,
       priceLineWidth: 1,
+      lastValueVisible: false,
       priceFormat,
       autoscaleInfoProvider: ((base) => {
         const info = base();
@@ -149,7 +150,7 @@ export function CandleChart({
     if (!current) return;
     const last = points.at(-1);
     const drawnLevels = levels.map((level) => `${level.title}:${level.price}:${level.tone}`).join("|");
-    const key = `${bucket}:${points.length}:${points[0]?.time ?? 0}:${last?.time ?? 0}:${last?.value ?? 0}:${drawnLevels}`;
+    const key = `${bucket}:${precision}:${points.length}:${points[0]?.time ?? 0}:${last?.time ?? 0}:${last?.value ?? 0}:${drawnLevels}`;
     if (key === signature.current) return;
     signature.current = key;
     for (const line of lines.current) current.candles.removePriceLine(line);
@@ -160,17 +161,19 @@ export function CandleChart({
         color: token(`--color-${level.tone}`),
         lineWidth: 1,
         lineStyle: LineStyle.Dotted,
-        axisLabelVisible: true,
-        title: level.title,
+        axisLabelVisible: false,
       }),
     );
+    current.candles.applyOptions({ priceFormat: { type: "price", precision, minMove: 10 ** -precision } });
+    current.chart.applyOptions({ localization: { priceFormatter: (value: number) => value.toFixed(precision).replace(/(\.\d{4}\d*?)0+$/, "$1") } });
     const candles = candlesFromPoints(points, bucket);
     const final = candles.at(-1);
     setLegend(final ? { open: final.open, high: final.high, low: final.low, close: final.close, volume: final.volume } : null);
     current.chart.applyOptions({ rightPriceScale: { visible: points.length > 0 }, timeScale: { visible: points.length > 0 } });
     current.candles.setData(candles.map(ohlc));
-    current.volume.setData(candles.map((candle) => ({ time: candle.time, value: candle.volume, color: candle.volume > 0 ? BAR : "transparent" })));
-  }, [points, bucket, levels]);
+    current.volume.setData(candles.map((candle) => ({ time: candle.time, value: candle.volume, color: candle.volume > 0 && candles.length >= 5 ? BAR : "transparent" })));
+    if (candles.length > 40) current.chart.timeScale().fitContent();
+  }, [points, bucket, levels, precision]);
 
   const shown = hovered ?? legend;
   return (
@@ -180,7 +183,7 @@ export function CandleChart({
         <p aria-hidden className="pointer-events-none absolute left-4 top-3 z-10 flex gap-3 text-[12px] tabular-nums text-muted">
           {(["open", "high", "low", "close"] as const).map((part) => (
             <span key={part}>
-              {part[0]?.toUpperCase()} <span className="text-ink">{fixed4(shown[part])}</span>
+              {part[0]?.toUpperCase()} <span className="text-ink">{shown[part].toFixed(precision)}</span>
             </span>
           ))}
           {shown.volume > 0 ? (
@@ -188,6 +191,11 @@ export function CandleChart({
               Vol <span className="text-ink">{shown.volume.toFixed(3).replace(/\.?0+$/, "")} MTok</span>
             </span>
           ) : null}
+          {levels.map((level) => (
+            <span key={level.title} className={level.tone === "down" ? "text-down" : level.tone === "up" ? "text-up" : undefined}>
+              {level.title} <span className={level.tone === "muted" ? "text-ink" : undefined}>{(Number(level.price) / 1e6).toFixed(precision)}</span>
+            </span>
+          ))}
         </p>
       ) : null}
       {points.length === 0 ? (

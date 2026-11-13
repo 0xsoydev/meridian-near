@@ -68,7 +68,7 @@ function Missing({ children }: { children: string }) {
   return <p className="flex h-6 shrink-0 items-center px-4 text-[12px] text-muted">{children}</p>;
 }
 
-export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (price: bigint) => void }) {
+export function OrderBook({ book, digits, onPrice }: { book: Book | null; digits: number; onPrice: (price: bigint) => void }) {
   const [view, setView] = useState<"book" | "trades">("book");
   const asks = ladder(
     (book?.asks ?? []).map((ask) => ({ price: BigInt(ask.price_micro_per_mtok), size: BigInt(ask.tokens_left) })),
@@ -112,7 +112,7 @@ export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (pric
               asks
                 .toReversed()
                 .map((level) => (
-                  <Row key={`ask-${level.price}`} level={level} price={tick(level.price)} side="ask" deepest={deepest} onPrice={onPrice} />
+                  <Row key={`ask-${level.price}`} level={level} price={tick(level.price, digits)} side="ask" deepest={deepest} onPrice={onPrice} />
                 ))
             )}
           </div>
@@ -122,7 +122,7 @@ export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (pric
               <span className="text-muted">{NIL}</span>
             ) : (
               <span className="flex gap-3 text-ink">
-                {tick(spread)}
+                {tick(spread, digits)}
                 <span className="text-muted">{percent(spread, bestAsk)}</span>
               </span>
             )}
@@ -132,7 +132,7 @@ export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (pric
               <Missing>No bids</Missing>
             ) : (
               bids.map((level) => (
-                <Row key={`bid-${level.price}`} level={level} price={tick(level.price)} side="bid" deepest={deepest} onPrice={onPrice} />
+                <Row key={`bid-${level.price}`} level={level} price={tick(level.price, digits)} side="bid" deepest={deepest} onPrice={onPrice} />
               ))
             )}
           </div>
@@ -158,7 +158,7 @@ export function OrderBook({ book, onPrice }: { book: Book | null; onPrice: (pric
                     key={`${fill.listing_id}-${fill.created_at}-${index}`}
                     className="grid h-6 grid-cols-3 items-center px-4 text-[12px] tabular-nums"
                   >
-                    <span className={tone}>{tick(price)}</span>
+                    <span className={tone}>{tick(price, digits)}</span>
                     <span className="text-right text-ink">{formatMtok(BigInt(fill.tokens))}</span>
                     <span className="text-right text-muted">{clockFormat.format(new Date(fill.created_at))}</span>
                   </li>

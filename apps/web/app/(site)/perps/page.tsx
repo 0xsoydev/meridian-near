@@ -25,7 +25,7 @@ import {
 } from "../../../components/kit";
 import { Shortcuts } from "../../../components/shortcuts";
 import { Amount, Portion } from "../../../components/ticket";
-import { ago, amount, api, explorer, fixed, fundingPercent, percent, price as fmtPrice, usd } from "../../../lib/client";
+import { ago, amount, api, explorer, fixed, fundingPercent, percent, places, price as fmtPrice, usd } from "../../../lib/client";
 import { runs } from "../../../lib/index-math";
 import { MARKETS } from "../../../lib/markets";
 import {
@@ -191,11 +191,13 @@ export default function PerpsPage() {
   const maxOi = market ? BigInt(market.max_oi) : 0n;
   const totalOi = longOi + shortOi;
   const funding = market ? BigInt(market.funding_rate_per_hour) : 0n;
+  const digits = places(price);
+  const at = (micro: bigint) => fmtPrice(micro, digits);
   const points = useMemo(() => postsToPoints(market?.posts ?? []), [market]);
   const change = dayChange(points, now);
   const postRuns = useMemo(() => runs(market?.posts ?? []).toReversed(), [market]);
   const rows = useMemo(() => historyRows(history ?? []), [history]);
-  const postPrices = postRuns.map((run) => fmtPrice(run.price));
+  const postPrices = postRuns.map((run) => at(run.price));
 
   const position = account?.positions.find((entry) => entry.model === model) ?? null;
   const held = position ? BigInt(position.size) : 0n;
@@ -210,11 +212,11 @@ export default function PerpsPage() {
   const ladderFor = tokens > 0n ? after : position ? math(position) : null;
   const ladder = ladderFor && price > 0n ? payoffLadder(ladderFor, price, MOVES) : [];
   const ladderLiquidation = ladderFor ? liquidationPrice(ladderFor) : 0n;
-  const ladderIndex = ladder.map((step) => fmtPrice(step.price));
+  const ladderIndex = ladder.map((step) => at(step.price));
   const ladderPnl = ladder.map((step) => `${step.pnl > 0n ? "+" : ""}${fixed(step.pnl, 4)}`);
   const ladderEquity = [
     ...ladder.map((step) => (step.liquidated ? "Liquidated" : fixed(step.equity, 4))),
-    ladderLiquidation === 0n ? "Never" : fmtPrice(ladderLiquidation),
+    ladderLiquidation === 0n ? "Never" : at(ladderLiquidation),
   ];
   const opposite = held !== 0n && held > 0n !== (side === "long");
   const max = wallet !== null && price > 0n ? maxOpen(wallet, price, BigInt(chosen)) + (opposite ? abs(held) : 0n) : 0n;
@@ -337,7 +339,7 @@ export default function PerpsPage() {
 
   const costs = (
     <dl className="flex flex-col gap-1.5">
-      <Line label="Entry price">{price > 0n ? fmtPrice(price) : "No index"}</Line>
+      <Line label="Entry price">{price > 0n ? at(price) : "No index"}</Line>
       <Line label="Notional">{amount(notional(delta, price))}</Line>
       <Line label="Margin with buffer and fee">{amount(margin)}</Line>
       <Line label="Fee (0.1%)">{amount(fees)}</Line>
@@ -345,7 +347,7 @@ export default function PerpsPage() {
   );
   const outcome = (
     <dl className="flex flex-col gap-1.5">
-      <Line label="Liquidation price">{liquidation === null || liquidation === 0n ? NIL : fmtPrice(liquidation)}</Line>
+      <Line label="Liquidation price">{liquidation === null || liquidation === 0n ? NIL : at(liquidation)}</Line>
       <Line label="Position after">{after ? describe(after.size) : "Flat"}</Line>
     </dl>
   );
@@ -357,7 +359,7 @@ export default function PerpsPage() {
         <MarketSelect value={model} onChange={(next) => setModel(next)} groups={[{ label: "Perps", models: MARKETS }]} />
         <dl className="grid min-w-0 grid-cols-3 gap-x-4 gap-y-2 lg:flex lg:gap-8 lg:overflow-x-auto">
           <Stat label="Index" big>
-            {price > 0n ? fmtPrice(price) : "Not posted"}
+            {price > 0n ? at(price) : "Not posted"}
           </Stat>
           <Stat label="24h change" tone={change === null || change === 0 ? undefined : change > 0 ? "up" : "down"}>
             {change === null ? NIL : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
@@ -393,6 +395,7 @@ export default function PerpsPage() {
             <CandleChart
               points={points}
               bucket={Number(bucket)}
+              precision={digits}
               empty="No index posts yet. The keeper posts once this model trades."
               levels={tokens > 0n && liquidation !== null && liquidation > 0n ? [{ price: liquidation, title: "Liq.", tone: "down" }] : []}
             />
@@ -551,14 +554,21 @@ export default function PerpsPage() {
                   items={leverages.map((value) => ({ value: String(value), label: `${value}x` }))}
                 />
               </div>
-              <div className="border-t border-line pt-3 lg:hidden">{costs}</div>
-              <p className="text-[13px] leading-[19px] text-muted">Settles in USDC against the index. Margin moves from your wallet into the position.</p>
-            </div>
-            <div className="sticky bottom-[52px] z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 lg:bottom-0 lg:pb-4">
-              <div className="flex flex-col gap-1.5">
-                <div className="hidden lg:block">{costs}</div>
+              <div className="flex flex-col gap-1.5 border-t border-line pt-3 lg:hidden">
+                {costs}
                 {outcome}
               </div>
+              <p className="text-[13px] leading-[19px] text-muted">Settles in USDC against the index. Margin moves from your wallet into the position.</p>
+            </div>
+            <div className="sticky bottom-[52px] z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 shadow-[0_-8px_16px_-8px_rgb(30_30_30/0.16)] lg:bottom-0 lg:pb-4 lg:shadow-none">
+              <div className="hidden flex-col gap-1.5 lg:flex">
+                {costs}
+                {outcome}
+              </div>
+              <dl className="flex items-baseline justify-between gap-4 text-[13px] tabular-nums lg:hidden">
+                <Pair label="Margin">{amount(margin)}</Pair>
+                <Pair label="Liquidates at">{liquidation === null || liquidation === 0n ? NIL : at(liquidation)}</Pair>
+              </dl>
               {paused ? <p className="text-[13px] leading-[19px] text-down">{paused}</p> : null}
               <CommitButton
                 type="submit"

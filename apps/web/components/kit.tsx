@@ -82,7 +82,8 @@ export function Toggle<T extends string>({
             aria-pressed={active}
             aria-keyshortcuts={item.hotkey}
             onClick={() => onChange(item.value)}
-            className={`inline-flex h-10 items-center gap-2 whitespace-nowrap text-[13px] transition-[color] duration-200 ease-brand ${FOCUS} ${
+            title={item.hotkey ? `Shortcut: ${item.hotkey}` : undefined}
+            className={`group inline-flex h-10 items-center gap-2 whitespace-nowrap text-[13px] transition-[color] duration-200 ease-brand ${FOCUS} ${
               active ? on : "text-muted decoration-transparent hover:text-ink"
             }`}
           >
@@ -90,7 +91,7 @@ export function Toggle<T extends string>({
               {item.label}
             </span>
             {item.hotkey ? (
-              <span className="hidden lg:inline-flex">
+              <span className="hidden opacity-0 transition-opacity duration-150 ease-brand group-hover:opacity-100 group-focus-visible:opacity-100 lg:inline-flex">
                 <Kbd>{item.hotkey}</Kbd>
               </span>
             ) : null}
@@ -238,7 +239,7 @@ export function MarketSelect({
       <span className="sr-only">Market</span>
       <span
         aria-hidden
-        className="truncate font-serif text-[24px] leading-[1.2] text-ink underline decoration-transparent underline-offset-[6px] transition-[text-decoration-color] duration-200 ease-brand group-hover:decoration-ink"
+        className="truncate font-serif text-[28px] leading-[1.2] text-ink underline decoration-transparent underline-offset-[6px] transition-[text-decoration-color] duration-200 ease-brand group-hover:decoration-ink"
       >
         {value || "Choose a market"}
       </span>
@@ -323,7 +324,7 @@ export function Stat({
     <div className={`flex min-w-0 flex-col gap-0.5 lg:shrink-0 ${className}`}>
       <dt className="truncate text-[13px] text-muted">{label}</dt>
       <dd
-        className={`truncate tabular-nums ${big ? "text-[24px] leading-[28px]" : "text-[13px]"} ${tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-ink"}`}
+        className={`truncate tabular-nums ${big ? "font-serif text-[22px] leading-[26px] lg:text-[28px] lg:leading-[32px]" : "text-[13px]"} ${tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-ink"}`}
       >
         {children}
       </dd>

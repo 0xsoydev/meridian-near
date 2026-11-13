@@ -23,7 +23,7 @@ import {
 } from "../../../components/kit";
 import { Shortcuts } from "../../../components/shortcuts";
 import { Amount, Portion } from "../../../components/ticket";
-import { KEY_STORAGE, amount, api, percent, price, railName, shortKey, tick, usd } from "../../../lib/client";
+import { KEY_STORAGE, amount, api, percent, places, price, railName, shortKey, tick, usd } from "../../../lib/client";
 import { MARKETS } from "../../../lib/markets";
 import { charge, dayChange, fillsToPoints, formatMtok, parseMtok, parseUsd, sellerEarning, stampFormat } from "../../../lib/price";
 import { quoteTicket, type Level } from "../../../lib/ticket";
@@ -255,6 +255,13 @@ export default function TradePage() {
   const depth = sum(asks.map((ask) => ask.tokens_left));
   const sellers = [...new Set((book?.asks ?? []).map((ask) => railName(ask.rail)))];
   const lastFill = book?.fills[0] ? BigInt(book.fills[0].price_micro_per_mtok) : null;
+  const digits = places(
+    ...[...asks, ...bids].map((level) => BigInt(level.price_micro_per_mtok)),
+    ...(listPrice === null ? [] : [listPrice]),
+    ...(index === null ? [] : [BigInt(index)]),
+    ...(lastFill === null ? [] : [lastFill]),
+  );
+  const at = (micro: bigint) => price(micro, digits);
   const apart = (a: bigint, b: bigint | null) => b === null || (a > b ? a - b : b - a) * 200n > a;
   const levels: ChartLevel[] = [
     ...(listPrice !== null && apart(listPrice, lastFill) ? [{ price: listPrice, title: "List", tone: "muted" as const }] : []),
@@ -263,7 +270,9 @@ export default function TradePage() {
   const held = sum((account?.holdings ?? []).filter((holding) => holding.model === model).map((holding) => holding.tokens));
   const budget = account
     ? BigInt(account.me.float_usd_micro) + smaller(BigInt(account.me.cap.left_usd_micro), BigInt(account.me.wallet_usd_micro))
-    : null;
+    : key
+      ? null
+      : wallet;
 
   const tokens = parseMtok(size);
   const limitPrice = mode === "limit" ? parseUsd(limit) : null;
@@ -302,7 +311,7 @@ export default function TradePage() {
     setMode(next);
     setProblem(null);
     const anchor = side === "buy" ? (bestAsk ?? bestBid) : (bestBid ?? bestAsk);
-    if (next === "limit" && limit === "" && anchor !== null) setLimit(tick(anchor));
+    if (next === "limit" && limit === "" && anchor !== null) setLimit(tick(anchor, digits));
   };
 
   const chooseSide = (next: Side) => {
@@ -385,7 +394,7 @@ export default function TradePage() {
     if (tokens <= 0n) return flag("size", "Enter a size above 0 MTok.");
     if (mode === "limit" && (limitPrice === null || limitPrice <= 0n)) return flag("limit", "Enter a price in USD per MTok, like 0.18.");
     if (mode === "limit" && limitPrice !== null && ceiling !== null && limitPrice > ceiling) {
-      return flag("limit", `The limit can't sit above the ${price(ceiling)} list price.`);
+      return flag("limit", `The limit can't sit above the ${at(ceiling)} list price.`);
     }
     if (side === "sell" && tokens > held) {
       return flag("size", held === 0n ? `You hold no ${model} MTok to sell.` : `You hold ${formatMtok(held)} MTok of ${model}.`);
@@ -432,7 +441,7 @@ export default function TradePage() {
           tone: "up",
           text: [
             sold > 0n ? `Sold ${formatMtok(sold)} MTok for ${usd(sellerEarning(gross, TAKE_BPS))} after the fee.` : "",
-            offered > 0n && limitPrice !== null ? `${formatMtok(offered)} MTok rests as an offer at ${price(limitPrice)}.` : "",
+            offered > 0n && limitPrice !== null ? `${formatMtok(offered)} MTok rests as an offer at ${at(limitPrice)}.` : "",
           ]
             .filter(Boolean)
             .join(" "),
@@ -487,14 +496,14 @@ export default function TradePage() {
   const summary = (
     <dl className="flex flex-col gap-1.5">
       {preview.fillable > 0n || mode === "market" ? (
-        <Line label="Average price">{preview.fillable === 0n ? NIL : price(preview.avg)}</Line>
+        <Line label="Average price">{preview.fillable === 0n ? NIL : at(preview.avg)}</Line>
       ) : null}
       {mode === "limit" || preview.partial ? (
         <Line label={side === "buy" ? "Fills now" : "Sells now"}>{formatMtok(preview.fillable)} MTok</Line>
       ) : null}
       {resting > 0n && limitPrice !== null ? (
         <Line label={side === "buy" ? "Rests as a bid" : "Rests as an offer"}>
-          {formatMtok(resting)} MTok at {price(limitPrice)}
+          {formatMtok(resting)} MTok at {at(limitPrice)}
         </Line>
       ) : null}
       {side === "buy" ? (
@@ -525,20 +534,20 @@ export default function TradePage() {
         <MarketSelect value={model} onChange={pick} groups={groups} />
         <dl className="grid min-w-0 grid-cols-3 gap-x-4 gap-y-2 lg:flex lg:gap-8 lg:overflow-x-auto">
           <Stat label="Best ask" big>
-            <Ticker value={bestAsk === null ? NIL : price(bestAsk)} />
+            <Ticker value={bestAsk === null ? NIL : at(bestAsk)} />
           </Stat>
           <Stat label="24h change" tone={change === null || change === 0 ? undefined : change > 0 ? "up" : "down"}>
             {change === null ? NIL : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
           </Stat>
           <Stat label="Best bid">
-            <Ticker value={bestBid === null ? NIL : price(bestBid)} />
+            <Ticker value={bestBid === null ? NIL : at(bestBid)} />
           </Stat>
           {perp ? (
             <Stat label="Index" className="max-lg:hidden">
-              <Ticker value={index === null ? "Not posted" : price(BigInt(index))} />
+              <Ticker value={index === null ? "Not posted" : at(BigInt(index))} />
             </Stat>
           ) : null}
-          <Stat label="List price">{listPrice === null ? NIL : price(listPrice)}</Stat>
+          <Stat label="List price">{listPrice === null ? NIL : at(listPrice)}</Stat>
           <Stat label="Vs list" tone={bestAsk !== null && listPrice !== null && bestAsk < listPrice ? "up" : undefined}>
             {bestAsk === null || listPrice === null || listPrice === 0n ? NIL : percent(bestAsk - listPrice, listPrice)}
           </Stat>
@@ -567,14 +576,14 @@ export default function TradePage() {
             <div className="flex items-center gap-4">
               {lastFill !== null ? (
                 <span className="whitespace-nowrap text-[12px] tabular-nums text-muted">
-                  Last fill <span className="text-ink">{price(lastFill)}</span>
+                  Last fill <span className="text-ink">{at(lastFill)}</span>
                 </span>
               ) : null}
               <ChartCredit />
             </div>
           </div>
           <div className="min-h-0 flex-1">
-            <CandleChart points={points} bucket={Number(bucket)} empty="No fills yet. The first trade prints here." levels={levels} />
+            <CandleChart points={points} bucket={Number(bucket)} precision={digits} empty="No fills yet. The first trade prints here." levels={levels} />
           </div>
         </section>
 
@@ -583,9 +592,10 @@ export default function TradePage() {
         >
           <OrderBook
             book={book}
+            digits={digits}
             onPrice={(price) => {
               setMode("limit");
-              setLimit(tick(price));
+              setLimit(tick(price, digits));
               setProblem(null);
               setPanel("trade");
             }}
@@ -642,7 +652,7 @@ export default function TradePage() {
                     {side === "buy" ? (
                       <Line label="Available">{budget === null ? "Reading" : usd(budget)}</Line>
                     ) : (
-                      <Line label="Best bid">{bestBid === null ? NIL : price(bestBid)}</Line>
+                      <Line label="Best bid">{bestBid === null ? NIL : at(bestBid)}</Line>
                     )}
                     <Line label="Holding">{account ? `${formatMtok(held)} MTok` : "Reading"}</Line>
                   </dl>
@@ -662,7 +672,7 @@ export default function TradePage() {
                   inputMode="decimal"
                   autoComplete="off"
                   alert={problem?.field === "limit"}
-                  note={problem?.field === "limit" ? problem.text : ceiling !== null ? `Ceiling ${price(ceiling)}, the highest list price` : undefined}
+                  note={problem?.field === "limit" ? problem.text : ceiling !== null ? `Ceiling ${at(ceiling)}, the highest list price` : undefined}
                 />
               ) : null}
               <Amount
@@ -677,10 +687,10 @@ export default function TradePage() {
                 alert={problem?.field === "size"}
                 note={problem?.field === "size" ? problem.text : undefined}
               />
-              {max > 0n ? (
+              {max > 0n && (key || accountId) ? (
                 <Portion
                   value={share}
-                  label={side === "buy" ? (key ? "Size as a share of what you can buy" : "Size as a share of the asks") : "Size as a share of what you hold"}
+                  label={side === "buy" ? "Size as a share of what you can buy" : "Size as a share of what you hold"}
                   onChange={(percent) => setSize(sizeText((max * BigInt(percent)) / 100n))}
                 />
               ) : null}
@@ -694,7 +704,7 @@ export default function TradePage() {
               ) : null}
             </div>
             <div
-              className={`z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 lg:bottom-0 lg:pb-4 ${key ? "sticky bottom-[52px]" : "lg:sticky"}`}
+              className={`z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 lg:bottom-0 lg:pb-4 lg:shadow-none ${key ? "sticky bottom-[52px] shadow-[0_-8px_16px_-8px_rgb(30_30_30/0.16)]" : "lg:sticky"}`}
             >
               <div className="hidden lg:block">{summary}</div>
               {key || !accountId || pasting ? null : (
