@@ -21,7 +21,7 @@ import {
   TD,
   Table,
 } from "../../../components/kit";
-import { api, explorer, percent, price as fmtPrice, railName, usd } from "../../../lib/client";
+import { api, explorer, percent, price as fmtPrice, railName, tick, usd } from "../../../lib/client";
 import { MARKETS } from "../../../lib/markets";
 import { charge, formatMicroPerMtok, formatMtok, parseUsd, sellerEarning } from "../../../lib/price";
 import type { Book, SellerListing, SellerPayouts, VenueStatus } from "../../../lib/types";
@@ -50,6 +50,7 @@ function Landing({ book, index, price }: { book: Book | null; index: string | nu
     <dl aria-live="polite" className="flex flex-col gap-1.5 border-l-2 border-line pl-3">
       <Line label="Place in line">{price === null ? "Enter a price" : asks.length === 0 ? "First ask in the book" : `${ordinal(ahead.length + 1)} of ${asks.length + 1}`}</Line>
       <Line label="Ahead of you">{price === null ? NIL : `${formatMtok(depth)} MTok`}</Line>
+      <Line label="You earn per MTok">{price === null ? NIL : fmtPrice(sellerEarning(price, TAKE_BPS))}</Line>
       <Line label="Best ask now">{best === null ? NIL : fmtPrice(best)}</Line>
       {index !== null ? <Line label="Index">{fmtPrice(BigInt(index))}</Line> : null}
     </dl>
@@ -328,7 +329,14 @@ export function SellDesk({ rails }: { rails: ReadonlyArray<Offered> }) {
                         : list === null
                         ? undefined
                         : micro === null
-                          ? `At or below ${fmtPrice(list)}. Lower asks fill first.`
+                          ? (
+                              <>
+                                At or below {fmtPrice(list)}. Lower asks fill first.{" "}
+                                <button type="button" onClick={() => setPrice(tick((list * 9n) / 10n))} className={`${LINK} text-ink`}>
+                                  Use {fmtPrice((list * 9n) / 10n)}, 10% under list
+                                </button>
+                              </>
+                            )
                           : above
                             ? `Above ${provider}'s list price of ${fmtPrice(list)}. Buyers can't be charged more than list.`
                             : `${percent(list - micro, list)} below ${provider}'s list price. Lower asks fill first.`
