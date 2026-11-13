@@ -404,7 +404,7 @@ The agent holds no NEAR key:
 | `/trade` | baseline §14; a Buy/Sell switch over the ticket; signed out, the ticket connects a wallet; connected with no key in this browser, it sets up trading in one step (a `create_key` signature, then `set_cap` for the daily spend) and keeps the router key in this browser, or takes a pasted router key; a short float refills from the owner's wallet; a size slider with stops at 25, 50, 75 % and Max; balances, holdings, orders and history in a row under the chart and book; keys B/S/M/L/`/`; prefill from `?model=&side=&size=&limit=` |
 | `/perps` | baseline §14; Long/Short and leverage switches; margin from the Meridian wallet, a payoff table at ±5/10/20 %, positions and history in a row under the chart, history from `perp_events` with explorer links, keys B/S/[/]/`/`, prefill from `?model=&side=&size=&leverage=` |
 | `/sell` | wallet → provider → key → model → price → capacity → one signature; earnings and payouts |
-| `/receipts` | rollups, index posts, NEAR AI proofs and payouts in a server component; the index recompute reads `core` over public NEAR RPC in the browser |
+| `/receipts` | one row per market (index, last post, rollups, fills, volume, allowed band) with its recompute, rollup tables for markets that have fills, NEAR AI proofs and payouts, in a server component; the recompute reads `core` over public NEAR RPC in the browser |
 
 - `providers.tsx` is a client-only context around `@hot-labs/near-connect`, with the network from `NEXT_PUBLIC_NEAR_NETWORK`. It exposes `accountId`, `connect`, `disconnect`, `signMessage` and `signAndSendTransactions`. Nonces come from `crypto.getRandomValues(new Uint8Array(32))`.
 - `public/skill.md` covers:

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { z } from "zod";
-import { SECONDARY } from "../../../components/kit";
+import { ROW, SMALL, TD } from "../../../components/kit";
 import { usd } from "../../../lib/client";
 import { recomputeIndex, type IndexRecompute } from "../../../lib/index-math";
 import type { Rollup } from "../../../lib/types";
@@ -49,10 +49,23 @@ function explain(result: IndexRecompute, count: number, window: number): string 
     : `${head} That moves it ${(Number(result.diffBps) / 100).toFixed(2)}%, posted once the move passes 0.1% or 5 minutes pass.`;
 }
 
-export function Recompute({ model, reference, window }: { model: string; reference: string; window: number }) {
+export function Recompute({
+  model,
+  reference,
+  window,
+  span,
+  children,
+}: {
+  model: string;
+  reference: string | null;
+  window: number;
+  span: number;
+  children: ReactNode;
+}) {
   const [state, setState] = useState<State>({ phase: "idle" });
 
   const run = async () => {
+    if (reference === null) return;
     setState({ phase: "reading" });
     try {
       const since = Math.floor(Date.now() / 60_000) - window;
@@ -76,20 +89,34 @@ export function Recompute({ model, reference, window }: { model: string; referen
     }
   };
 
+  const said =
+    state.phase === "done"
+      ? explain(state.result, state.count, window)
+      : state.phase === "failed"
+        ? "Couldn't read core over NEAR RPC. Check your connection and retry."
+        : "";
+
   return (
-    <div className="flex flex-col items-start gap-3">
-      <button type="button" disabled={state.phase === "reading"} onClick={() => void run()} className={SECONDARY}>
-        {state.phase === "reading" ? "Reading core" : "Recompute in this browser"}
-      </button>
-      <p role="status" className={`max-w-[68ch] text-[13px] leading-[20px] ${state.phase === "failed" ? "text-down" : "text-ink"}`}>
-        {state.phase === "done"
-          ? explain(state.result, state.count, window)
-          : state.phase === "failed"
-            ? "Couldn't read core over NEAR RPC. Check your connection and retry."
-            : state.phase === "reading"
-              ? "Reading rollups and the index from core over NEAR RPC."
-              : `Reads the rollups and the posted index straight from ${CORE || "core"} over public NEAR RPC, then runs the keeper's math here.`}
-      </p>
-    </div>
+    <>
+      <tr className={ROW}>
+        {children}
+        <td className={`${TD} text-right`}>
+          {reference === null ? null : (
+            <button type="button" disabled={state.phase === "reading"} onClick={() => void run()} className={SMALL}>
+              {state.phase === "reading" ? "Reading core" : "Recompute"}
+            </button>
+          )}
+        </td>
+      </tr>
+      <tr>
+        <td
+          colSpan={span}
+          role="status"
+          className={`max-w-0 text-pretty px-4 text-[13px] leading-[20px] ${said ? "pb-4" : ""} ${state.phase === "failed" ? "text-down" : "text-ink"}`}
+        >
+          {said}
+        </td>
+      </tr>
+    </>
   );
 }
