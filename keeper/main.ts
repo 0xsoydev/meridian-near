@@ -33,6 +33,6 @@ every("rollup", 60_000, async () => {
 });
 every("sweep", 60_000, sweepStale);
 every("match", 60_000, matchRestingBids);
-every("liquidate", 30_000, liquidateUnderwater);
+every("liquidate", 60_000, liquidateUnderwater);
 every("payouts", 60_000, dailyClose);
 console.log(`keeper running, index window ${process.env.INDEX_WINDOW_MIN ?? "60"} min`);

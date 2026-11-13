@@ -82,7 +82,7 @@ Not used: Chain Signatures, x402, the Agent API, Sputnik DAO, NEP-245 MTokens.
       withdraw · liquidate           wallets · caps · treasury · vault · markets · positions
                                      index posts · rollups · fills
                                      ^ keeper key: post · log_rollups · liquidate · payout
- Keeper, Node 22, always on ─────────┘ 60 s rollups · 180 s index · 30 s liquidations · daily payouts
+ Keeper, Node 22, always on ─────────┘ 60 s rollups · 180 s index · 60 s liquidations · daily payouts
  Other chains ──1Click deposit address──> core, msg {"fund":{"to":"<owner>"}}
 ```
 
@@ -287,7 +287,7 @@ Baseline §10.10, unchanged: buys walk the asks, limit buys rest as bids, the ma
 - Orders are `core.modify(model, size_delta, margin_delta)` with 1 yocto and 50 Tgas. Margin comes from the Meridian wallet, and the ticket shows the wallet balance, the fee and the resulting liquidation price.
 - `orderPlan`, `positionAfter` and `liquidationPrice` in `lib/perp.ts` are unchanged. A flip is a close, then an open, in one `signAndSendTransactions`.
 - Positions, the margin editor and the stale-index message work as in baseline §10.8. Trade history is not built yet.
-- The keeper pages `liquidatable` every 30 s and calls `liquidate`.
+- The keeper pages `liquidatable` every 60 s and calls `liquidate`.
 
 ### 9.9 Fees and the treasury
 
@@ -377,7 +377,7 @@ One Node process. Each loop catches its own errors and never overlaps itself.
 |---|---|
 | 60 s | `publishRollups` → `core.log_rollups` |
 | 180 s, or woken | `postIndexes` → `core.post` |
-| 30 s | `liquidateUnderwater`: `core.liquidatable`, then `core.liquidate` |
+| 60 s | `liquidateUnderwater`: `core.liquidatable`, then `core.liquidate` |
 | 60 s | `releaseStale`, `returnSwarmFloats`, `matchAllBids` |
 | 60 s | `dailyClose`: `closeDay`, then `payPending` |
 
@@ -428,7 +428,7 @@ UX rules:
 | Name | Used by | Value |
 |---|---|---|
 | `NEAR_NETWORK`, `NEXT_PUBLIC_NEAR_NETWORK` | all | `testnet` or `mainnet` |
-| `NEAR_RPC_URL` | web, keeper, agent | `https://free.rpc.fastnear.com` (mainnet), `https://test.rpc.fastnear.com` (testnet) |
+| `NEAR_RPC_URL` | web, keeper, agent | Comma-separated, tried in order; a 429, 5xx, timeout or network failure moves to the next one. Default `https://free.rpc.fastnear.com` (mainnet); `https://test.rpc.fastnear.com`, then `https://near-testnet.drpc.org` (testnet) |
 | `NEAR_CORE_ID`, `NEXT_PUBLIC_NEAR_CORE_ID` | all | `core.<team>.near` |
 | `NEAR_OWNER_ID` | web, keeper, seed | `<team>.near` |
 | `NEAR_OPS_ID` | web, keeper | `ops.<team>.near` |
