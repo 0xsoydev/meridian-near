@@ -428,7 +428,7 @@ UX rules:
 | Name | Used by | Value |
 |---|---|---|
 | `NEAR_NETWORK`, `NEXT_PUBLIC_NEAR_NETWORK` | all | `testnet` or `mainnet` |
-| `NEAR_RPC_URL` | web, keeper, agent | `https://free.rpc.fastnear.com` (mainnet), `https://test.rpc.fastnear.com` (testnet) |
+| `NEAR_RPC_URL` | web, keeper, agent | Comma-separated, tried in order; a 429, 5xx, timeout or network failure moves to the next one. Default `https://free.rpc.fastnear.com` (mainnet); `https://test.rpc.fastnear.com`, then `https://near-testnet.drpc.org` (testnet) |
 | `NEAR_CORE_ID`, `NEXT_PUBLIC_NEAR_CORE_ID` | all | `core.<team>.near` |
 | `NEAR_OWNER_ID` | web, keeper, seed | `<team>.near` |
 | `NEAR_OPS_ID` | web, keeper | `ops.<team>.near` |
