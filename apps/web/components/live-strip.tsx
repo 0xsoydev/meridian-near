@@ -40,7 +40,7 @@ export function LiveStrip() {
       aria-label="Venue status"
       className={`fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white px-4 lg:block lg:px-6 ${exchange ? "hidden" : "block"}`}
     >
-      <div className="flex h-9 items-center gap-x-6 overflow-hidden whitespace-nowrap text-[12px] tabular-nums text-muted max-lg:[mask-image:linear-gradient(to_right,black_75%,transparent)]">
+      <div className="flex h-9 items-center gap-x-6 overflow-hidden whitespace-nowrap text-[13px] tabular-nums text-muted max-lg:[mask-image:linear-gradient(to_right,black_75%,transparent)]">
         <span className="flex items-center gap-1.5 text-ink">
           <span aria-hidden className={`size-[7px] rounded-full ${keeperUp ? "bg-up" : "bg-down"}`} />
           {status === null

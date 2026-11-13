@@ -39,7 +39,7 @@ export function Amount({
         ) : null}
         {end}
       </div>
-      {note ? <p className={`text-pretty text-[12px] leading-[18px] ${alert ? "text-down" : "text-muted"}`}>{note}</p> : null}
+      {note ? <p className={`text-pretty text-[13px] leading-[19px] ${alert ? "text-down" : "text-muted"}`}>{note}</p> : null}
     </div>
   );
 }
