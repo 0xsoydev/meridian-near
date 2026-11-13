@@ -44,12 +44,10 @@ export function SiteFooter() {
           ))}
         </nav>
       </div>
-      <p
+      <div
         aria-hidden
-        className="-mb-[0.2em] select-none whitespace-nowrap text-center font-serif text-[24vw] leading-none tracking-[-0.03em] text-line min-[1440px]:text-[346px]"
-      >
-        Meridian
-      </p>
+        className="mx-auto mb-[-2%] aspect-[57/13] w-[calc(100%-40px)] max-w-[1200px] bg-line [mask:url(/images/namelogo.svg)_center/contain_no-repeat] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)]"
+      />
     </footer>
   );
 }
