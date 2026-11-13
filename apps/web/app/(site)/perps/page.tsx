@@ -10,6 +10,7 @@ import {
   LINK,
   Line,
   NIL,
+  Pair,
   MarketSelect,
   MobileTabs,
   Panel,
@@ -218,6 +219,11 @@ export default function PerpsPage() {
   const opposite = held !== 0n && held > 0n !== (side === "long");
   const max = wallet !== null && price > 0n ? maxOpen(wallet, price, BigInt(chosen)) + (opposite ? abs(held) : 0n) : 0n;
   const share = max > 0n ? Number((tokens * 100n) / max > 100n ? 100n : (tokens * 100n) / max) : 0;
+  const inPositions = (account?.positions ?? []).reduce((total, entry) => total + BigInt(entry.margin_usd_micro), 0n);
+  const unrealized = (account?.positions ?? []).reduce(
+    (total, entry) => total + BigInt(entry.equity_usd_micro) - BigInt(entry.margin_usd_micro) + BigInt(entry.funding_owed_usd_micro),
+    0n,
+  );
   const marks = new Map((status?.markets ?? []).map((entry) => [entry.model, entry.index_micro_per_mtok]));
   const leverages = Array.from({ length: Math.min(maxLeverage, 5) }, (_, step) => (maxLeverage <= 5 ? step + 1 : [1, 2, 3, 5, maxLeverage][step] ?? 1));
 
@@ -329,12 +335,16 @@ export default function PerpsPage() {
     </div>
   );
 
-  const summary = (
+  const costs = (
     <dl className="flex flex-col gap-1.5">
       <Line label="Entry price">{price > 0n ? fmtPrice(price) : "No index"}</Line>
       <Line label="Notional">{amount(notional(delta, price))}</Line>
       <Line label="Margin with buffer and fee">{amount(margin)}</Line>
       <Line label="Fee (0.1%)">{amount(fees)}</Line>
+    </dl>
+  );
+  const outcome = (
+    <dl className="flex flex-col gap-1.5">
       <Line label="Liquidation price">{liquidation === null || liquidation === 0n ? NIL : fmtPrice(liquidation)}</Line>
       <Line label="Position after">{after ? describe(after.size) : "Flat"}</Line>
     </dl>
@@ -380,7 +390,12 @@ export default function PerpsPage() {
             </div>
           </div>
           <div className="min-h-0 flex-1">
-            <CandleChart points={points} bucket={Number(bucket)} empty="No index posts yet. The keeper posts once this model trades." />
+            <CandleChart
+              points={points}
+              bucket={Number(bucket)}
+              empty="No index posts yet. The keeper posts once this model trades."
+              levels={tokens > 0n && liquidation !== null && liquidation > 0n ? [{ price: liquidation, title: "Liq.", tone: "down" }] : []}
+            />
           </div>
         </section>
 
@@ -443,7 +458,7 @@ export default function PerpsPage() {
               <Line label="Funding">{funding > 0n ? "Longs pay shorts" : funding < 0n ? "Shorts pay longs" : "Nobody pays, sides are even"}</Line>
             </dl>
           </Panel>
-          <Panel inset title="Index posts" className="min-h-[200px] border-t border-line lg:min-h-0 lg:flex-1" bodyClassName="flex flex-col">
+          <Panel inset title="Index history" className="min-h-[200px] border-t border-line lg:min-h-0 lg:flex-1" bodyClassName="flex flex-col">
             {postRuns.length === 0 ? (
               <p className="px-4 py-4 text-[12px] text-muted">No posts yet.</p>
             ) : (
@@ -460,12 +475,12 @@ export default function PerpsPage() {
                       <span className="text-ink">
                         {postPrices[position]}{" "}
                         <span className={move > 0n ? "text-up" : move < 0n ? "text-down" : "text-muted"}>
-                          {older ? `${move > 0n ? "+" : ""}${percent(move, older.price)}` : "first"}
+                          {older ? `${move > 0n ? "+" : ""}${percent(move, older.price)}` : ""}
                         </span>
                       </span>
                       <span className="text-right text-muted">
                         {run.count > 1
-                          ? `${clockFormat.format(new Date(run.from * 1000)).slice(0, 5)} to ${clockFormat.format(new Date(run.to * 1000)).slice(0, 5)}, ${run.count} posts`
+                          ? `${clockFormat.format(new Date(run.from * 1000)).slice(0, 5)} to ${clockFormat.format(new Date(run.to * 1000)).slice(0, 5)} (${run.count} posts)`
                           : clockFormat.format(new Date(run.from * 1000))}
                       </span>
                     </li>
@@ -478,7 +493,7 @@ export default function PerpsPage() {
 
         <section aria-label="Order ticket" className={`${panel === "trade" ? "flex" : "hidden"} min-h-0 flex-col lg:col-[3] lg:row-[1/3] lg:flex`}>
           <div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
-            <Toggle label="Order type" value="market" onChange={() => undefined} items={[{ value: "market", label: "Market" }]} />
+            <h2 className="text-[13px] text-ink">Market order</h2>
             <span className="text-[12px] text-muted">Fills at the index</span>
           </div>
           <form
@@ -536,12 +551,15 @@ export default function PerpsPage() {
                   items={leverages.map((value) => ({ value: String(value), label: `${value}x` }))}
                 />
               </div>
-              <div className="border-t border-line pt-3 lg:hidden">{summary}</div>
-              <p className="text-[12px] leading-[18px] text-muted">Settles in USDC against the index. Margin moves from your wallet into the position.</p>
+              <div className="border-t border-line pt-3 lg:hidden">{costs}</div>
+              <p className="text-[13px] leading-[19px] text-muted">Settles in USDC against the index. Margin moves from your wallet into the position.</p>
             </div>
             <div className="sticky bottom-[52px] z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 lg:bottom-0 lg:pb-4">
-              <div className="hidden lg:block">{summary}</div>
-              {paused ? <p className="text-[12px] leading-[18px] text-down">{paused}</p> : null}
+              <div className="flex flex-col gap-1.5">
+                <div className="hidden lg:block">{costs}</div>
+                {outcome}
+              </div>
+              {paused ? <p className="text-[13px] leading-[19px] text-down">{paused}</p> : null}
               <CommitButton
                 type="submit"
                 tone={!accountId ? "ink" : side === "long" ? "up" : "down"}
@@ -569,7 +587,7 @@ export default function PerpsPage() {
           aria-label="Positions and history"
           className={`${panel === "positions" ? "flex" : "hidden"} min-h-0 flex-col border-t border-line lg:col-[1/3] lg:row-[2] lg:flex lg:border-r`}
         >
-        <div className="flex h-10 shrink-0 items-center border-b border-line px-4">
+        <div className="flex h-10 shrink-0 items-center justify-between gap-6 border-b border-line px-4">
           <Toggle
             label="Account view"
             value={view}
@@ -579,6 +597,15 @@ export default function PerpsPage() {
               { value: "history", label: "History" },
             ]}
           />
+          {account ? (
+            <dl className="hidden items-baseline gap-6 text-[13px] tabular-nums lg:flex">
+              <Pair label="Equity">{usd((wallet ?? 0n) + inPositions + unrealized)}</Pair>
+              <Pair label="Margin in positions">{usd(inPositions)}</Pair>
+              <Pair label="Unrealized PnL" tone={unrealized > 0n ? "up" : unrealized < 0n ? "down" : undefined}>
+                {signed(unrealized)}
+              </Pair>
+            </dl>
+          ) : null}
         </div>
         <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {!accountId ? (

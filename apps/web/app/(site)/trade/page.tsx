@@ -11,6 +11,7 @@ import {
   MarketSelect,
   MobileTabs,
   NIL,
+  Pair,
   ROW,
   SECONDARY,
   SMALL,
@@ -43,7 +44,7 @@ import {
   walletSchema,
 } from "../../../lib/wire";
 import { useNear } from "../providers";
-import { CandleChart, ChartCredit, INTERVALS, type Interval } from "./chart";
+import { CandleChart, ChartCredit, INTERVALS, type Interval, type Level as ChartLevel } from "./chart";
 import { OrderBook } from "./order-book";
 
 const CORE = process.env.NEXT_PUBLIC_NEAR_CORE_ID ?? "";
@@ -96,7 +97,7 @@ function Balance({ label, value, note }: { label: string; value: string; note: s
         <dt className="text-ink">{label}</dt>
         <dd className="tabular-nums text-ink">{value}</dd>
       </div>
-      <p className="text-[12px] leading-[18px] text-muted">{note}</p>
+      <p className="text-[13px] leading-[19px] text-muted">{note}</p>
     </div>
   );
 }
@@ -254,6 +255,11 @@ export default function TradePage() {
   const depth = sum(asks.map((ask) => ask.tokens_left));
   const sellers = [...new Set((book?.asks ?? []).map((ask) => railName(ask.rail)))];
   const lastFill = book?.fills[0] ? BigInt(book.fills[0].price_micro_per_mtok) : null;
+  const apart = (a: bigint, b: bigint | null) => b === null || (a > b ? a - b : b - a) * 200n > a;
+  const levels: ChartLevel[] = [
+    ...(listPrice !== null && apart(listPrice, lastFill) ? [{ price: listPrice, title: "List", tone: "muted" as const }] : []),
+    ...(perp && index !== null && apart(BigInt(index), listPrice) && apart(BigInt(index), lastFill) ? [{ price: BigInt(index), title: "Index", tone: "muted" as const }] : []),
+  ];
   const held = sum((account?.holdings ?? []).filter((holding) => holding.model === model).map((holding) => holding.tokens));
   const budget = account
     ? BigInt(account.me.float_usd_micro) + smaller(BigInt(account.me.cap.left_usd_micro), BigInt(account.me.wallet_usd_micro))
@@ -480,7 +486,9 @@ export default function TradePage() {
 
   const summary = (
     <dl className="flex flex-col gap-1.5">
-      <Line label="Average price">{preview.fillable === 0n ? NIL : price(preview.avg)}</Line>
+      {preview.fillable > 0n || mode === "market" ? (
+        <Line label="Average price">{preview.fillable === 0n ? NIL : price(preview.avg)}</Line>
+      ) : null}
       {mode === "limit" || preview.partial ? (
         <Line label={side === "buy" ? "Fills now" : "Sells now"}>{formatMtok(preview.fillable)} MTok</Line>
       ) : null}
@@ -490,16 +498,21 @@ export default function TradePage() {
         </Line>
       ) : null}
       {side === "buy" ? (
-        <Line label="You pay">{amount(preview.cost + restingValue)}</Line>
-      ) : resting > 0n ? (
         <>
-          <Line label="You receive now">{amount(preview.net)}</Line>
-          <Line label="When the offer fills">{amount(sellerEarning(restingValue, TAKE_BPS))}</Line>
+          <Line label="Fee">{amount(0n)}</Line>
+          <Line label="You pay">{amount(preview.cost + restingValue)}</Line>
         </>
       ) : (
         <>
-          <Line label="Fee (10%)">{amount(preview.fee)}</Line>
-          <Line label="You receive">{amount(preview.net)}</Line>
+          <Line label="Fee (10%)">{amount(preview.fee + restingValue - sellerEarning(restingValue, TAKE_BPS))}</Line>
+          {resting > 0n ? (
+            <>
+              <Line label="You receive now">{amount(preview.net)}</Line>
+              <Line label="When the offer fills">{amount(sellerEarning(restingValue, TAKE_BPS))}</Line>
+            </>
+          ) : (
+            <Line label="You receive">{amount(preview.net)}</Line>
+          )}
         </>
       )}
     </dl>
@@ -561,7 +574,7 @@ export default function TradePage() {
             </div>
           </div>
           <div className="min-h-0 flex-1">
-            <CandleChart points={points} bucket={Number(bucket)} empty="No fills yet. The first trade prints here." />
+            <CandleChart points={points} bucket={Number(bucket)} empty="No fills yet. The first trade prints here." levels={levels} />
           </div>
         </section>
 
@@ -623,7 +636,7 @@ export default function TradePage() {
               />
               {key ? (
                 accountError ? (
-                  <p className="text-[12px] leading-[18px] text-down">{accountError}</p>
+                  <p className="text-[13px] leading-[19px] text-down">{accountError}</p>
                 ) : (
                   <dl className="flex flex-col gap-1.5">
                     {side === "buy" ? (
@@ -638,40 +651,6 @@ export default function TradePage() {
                 <dl className="flex flex-col gap-1.5">
                   <Line label="Wallet">{wallet === null ? "Reading" : usd(wallet)}</Line>
                 </dl>
-              ) : null}
-              {key ? null : pasting ? (
-                <Amount
-                  ref={keyRef}
-                  label="Router key"
-                  type="password"
-                  value={draftKey}
-                  onChange={(event) => setDraftKey(event.target.value)}
-                  placeholder="rk_"
-                  autoComplete="off"
-                  spellCheck={false}
-                  alert={problem?.field === "key"}
-                  note={problem?.field === "key" ? problem.text : "A key from the Wallet page. It stays in this browser."}
-                />
-              ) : accountId ? (
-                <div className="flex flex-col gap-3 border border-line bg-wash p-3">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-[13px] text-ink">Set up trading</p>
-                    <p className="text-pretty text-[12px] leading-[18px] text-muted">
-                      Once per browser: a router key that pays from your wallet, never more than you allow in a day.
-                    </p>
-                  </div>
-                  <Amount
-                    ref={dailyRef}
-                    label="Spend per day"
-                    unit="USDC"
-                    value={daily}
-                    onChange={(event) => setDaily(event.target.value)}
-                    inputMode="decimal"
-                    autoComplete="off"
-                    alert={problem?.field === "daily"}
-                    note={problem?.field === "daily" ? problem.text : undefined}
-                  />
-                </div>
               ) : null}
               {mode === "limit" ? (
                 <Amount
@@ -707,15 +686,52 @@ export default function TradePage() {
               ) : null}
               <div className="border-t border-line pt-3 lg:hidden">{summary}</div>
               {key ? (
-                <p className="text-[12px] leading-[18px] text-muted">
+                <p className="text-[13px] leading-[19px] text-muted">
                   {side === "buy"
                     ? "Paid from the key's balance first, then your wallet within today's limit."
                     : "Proceeds go to the key's balance, minus the 10% venue fee."}
                 </p>
               ) : null}
             </div>
-            <div className="sticky bottom-[52px] z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 lg:bottom-0 lg:pb-4">
+            <div
+              className={`z-10 flex flex-col gap-3 border-t border-line bg-white px-4 pb-6 pt-4 lg:bottom-0 lg:pb-4 ${key ? "sticky bottom-[52px]" : "lg:sticky"}`}
+            >
               <div className="hidden lg:block">{summary}</div>
+              {key || !accountId || pasting ? null : (
+                <div className="flex flex-col gap-3 border border-line p-3">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-[13px] text-ink">Step 1 of 2: set up trading</p>
+                    <p className="text-pretty text-[13px] leading-[19px] text-muted">
+                      A router key for this browser. It pays from your wallet, never more than you allow in a day. Then place your order.
+                    </p>
+                  </div>
+                  <Amount
+                    ref={dailyRef}
+                    label="Spend per day"
+                    unit="USDC"
+                    value={daily}
+                    onChange={(event) => setDaily(event.target.value)}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    alert={problem?.field === "daily"}
+                    note={problem?.field === "daily" ? problem.text : undefined}
+                  />
+                </div>
+              )}
+              {!key && pasting ? (
+                <Amount
+                  ref={keyRef}
+                  label="Router key"
+                  type="password"
+                  value={draftKey}
+                  onChange={(event) => setDraftKey(event.target.value)}
+                  placeholder="rk_"
+                  autoComplete="off"
+                  spellCheck={false}
+                  alert={problem?.field === "key"}
+                  note={problem?.field === "key" ? problem.text : "A key from the Wallet page. It stays in this browser."}
+                />
+              ) : null}
               <CommitButton type="submit" tone={!key ? "ink" : side === "buy" ? "up" : "down"} disabled={busy} aria-busy={busy} className="w-full">
                 {busy
                   ? key
@@ -728,7 +744,7 @@ export default function TradePage() {
                     : pasting
                       ? "Use this key"
                       : accountId
-                        ? "Set up trading"
+                        ? "Create router key"
                         : "Connect wallet to trade"}
               </CommitButton>
               {!key ? (
@@ -761,7 +777,7 @@ export default function TradePage() {
           aria-label="Your account"
           className={`${panel === "account" ? "flex" : "hidden"} min-h-0 flex-col border-t border-line lg:col-[1/3] lg:row-[2] lg:flex lg:border-r`}
         >
-        <div className="flex h-10 shrink-0 items-center overflow-x-auto border-b border-line px-4">
+        <div className="flex h-10 shrink-0 items-center justify-between gap-6 overflow-x-auto border-b border-line px-4">
           <Toggle
             label="Account view"
             value={view}
@@ -773,6 +789,13 @@ export default function TradePage() {
               { value: "history", label: "History" },
             ]}
           />
+          {account ? (
+            <dl className="hidden items-baseline gap-6 text-[13px] tabular-nums xl:flex">
+              <Pair label="Key balance">{usd(BigInt(account.me.float_usd_micro))}</Pair>
+              <Pair label="Left today">{usd(BigInt(account.me.cap.left_usd_micro))}</Pair>
+              <Pair label="Prepaid">{formatMtok(BigInt(account.me.prepaid_tokens))} MTok</Pair>
+            </dl>
+          ) : null}
         </div>
         <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {!account && !key && accountId ? (
