@@ -54,13 +54,14 @@ async function main(): Promise<void> {
 
   const nearai = process.env.NEARAI_API_KEY;
   if (nearai) {
+    const model = process.env.SEED_MODEL ?? "glm-5.3-flash";
     await listing({
       sellerId: account.id,
       rail: "near-ai",
-      model: process.env.SEED_MODEL ?? "glm-5.3-flash",
+      model,
       price: BigInt(process.env.SEED_PRICE_MICRO ?? "180000"),
       key: nearai,
-      nonce: "seed-near-ai-house",
+      nonce: `seed-near-ai-${model}`,
     });
   } else {
     console.log("seed: NEARAI_API_KEY missing, skipping the house listing");
