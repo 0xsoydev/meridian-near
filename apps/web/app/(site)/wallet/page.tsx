@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { z } from "zod";
 import { ConfirmButton } from "../../../components/confirm-button";
 import { CopyButton } from "../../../components/copy-button";
+import { AgentPrompt } from "../../../components/landing/agents-terminal";
 import {
   CommitButton,
   Empty,
@@ -730,21 +731,13 @@ export default function WalletPage() {
               </Field>
             )
           ) : null}
-          {testnetDeposit ? (
+          {testnetDeposit && !nearForm ? (
             <div className="flex flex-col items-start gap-2">
-              {nearForm ? (
-                <button type="button" disabled={busy !== null || funded} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()} className={SECONDARY}>
-                  {faucetLabel}
-                </button>
-              ) : (
-                <CommitButton disabled={busy !== null || funded} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()}>
-                  {faucetLabel}
-                </CommitButton>
-              )}
+              <CommitButton disabled={busy !== null || funded} aria-busy={busy === "faucet"} onClick={() => void claimFaucet()}>
+                {faucetLabel}
+              </CommitButton>
               <p className="text-pretty text-[13px] leading-[20px] text-muted">
-                {funded && balances
-                  ? `This demo runs on NEAR testnet. Your wallet holds ${usd(balances.wallet)}, and the faucet only tops up wallets under $1.00.`
-                  : "This demo runs on NEAR testnet. The faucet tops up wallets holding under $1.00; deposits from other chains run on mainnet."}
+                This demo runs on NEAR testnet. The faucet tops up wallets holding under $1.00; deposits from other chains run on mainnet.
               </p>
             </div>
           ) : null}
@@ -925,7 +918,21 @@ export default function WalletPage() {
             </div>
           )}
           <Said notice={money} />
-          {footnote ? <p className="text-[12px] leading-[18px] text-muted">{footnote}</p> : null}
+          {footnote ? <p className="text-[13px] leading-[19px] text-muted">{footnote}</p> : null}
+          {testnetDeposit && nearForm ? (
+            <p className="text-pretty text-[13px] leading-[19px] text-muted">
+              {funded && balances ? (
+                `Test USDC comes from a faucet that tops up wallets under $1.00, and yours holds ${usd(balances.wallet)}.`
+              ) : (
+                <>
+                  Need test USDC?{" "}
+                  <button type="button" disabled={busy !== null} onClick={() => void claimFaucet()} className={`${LINK} text-ink`}>
+                    {busy === "faucet" ? "Waiting for the wallet" : "Get 10 from the faucet"}
+                  </button>
+                </>
+              )}
+            </p>
+          ) : null}
         </Panel>
 
         <Panel
@@ -991,7 +998,10 @@ export default function WalletPage() {
                 : "Sign once to see your agents and what they spent. It proves this wallet owns them, and nothing goes on chain."}
             </Empty>
           ) : keys.length === 0 ? (
-            <Empty start>No agents yet. Create a key, then give it to an agent with a daily limit.</Empty>
+            <div className="flex flex-col gap-5">
+              <Empty start>No agents yet. Create a key here, or let your coding agent ask for one and approve it on your phone.</Empty>
+              <AgentPrompt host={window.location.origin} />
+            </div>
           ) : (
             <div role="list" aria-label="Agents" className="flex flex-col">
               <div
