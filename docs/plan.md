@@ -363,7 +363,7 @@ Claude Code and Codex list from the seller's subscription instead of an API key.
 4. The router refreshes 60 s before `expires_at` and once on a 401, writing the rotated refresh token before the new access token is used. If a concurrent request won the rotation, the loser re-reads the row and uses the winner. A provider refusal marks the listing `invalid`; a 5xx, 429 or timeout from the token endpoint leaves it active and fails only that request.
 5. `DELETE /api/listings/:id` keeps API keys sealed so prepaid MTokens keep serving, and erases an OAuth grant once the listing has no prepaid MTokens left. The seller sees the account and plan on each listing.
 
-Claude requests go to `/v1/messages` with `anthropic-beta: oauth-2025-04-20` and the Claude Code system preamble, and its answers and SSE are translated to OpenAI shapes. Codex requests use the Responses backend and its SSE is translated, tools included.
+Claude connect uses `https://claude.com/cai/oauth/authorize`, the `https://platform.claude.com/v1/oauth/token` exchange and `https://platform.claude.com/oauth/code/callback` manual redirect, the Claude Code scope set, and sends `state` with the code. Inference goes to `/v1/messages` with `anthropic-beta: oauth-2025-04-20` and the Claude Code system preamble, and its answers and SSE are translated to OpenAI shapes. Codex requests use the Responses backend and its SSE is translated, tools included.
 
 ### 9.16 Testnet faucet (`app/api/v1/faucet/route.ts`)
 

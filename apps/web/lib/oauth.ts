@@ -24,10 +24,11 @@ type Client = {
 const CLIENTS: Record<OAuthRail, Client> = {
   "claude-code": {
     clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-    authorize: "https://claude.ai/oauth/authorize",
-    token: "https://console.anthropic.com/v1/oauth/token",
-    redirect: "https://console.anthropic.com/oauth/code/callback",
-    scope: "org:create_api_key user:profile user:inference",
+    authorize: "https://claude.com/cai/oauth/authorize",
+    token: "https://platform.claude.com/v1/oauth/token",
+    redirect: "https://platform.claude.com/oauth/code/callback",
+    scope:
+      "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload user:plugins",
     base: process.env.CLAUDE_CODE_BASE_URL || process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com/v1",
   },
   codex: {
@@ -117,7 +118,7 @@ export function maskAccount(account: string | null): string | null {
 export type Probe = { ok: true } | { ok: false; status: number; message: string };
 
 function pkce(): { verifier: string; challenge: string } {
-  const verifier = randomBytes(32).toString("base64url");
+  const verifier = randomBytes(64).toString("base64url");
   return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
 }
 
@@ -231,14 +232,24 @@ async function tokenRequest(client: Client, body: Record<string, unknown>): Prom
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const terminal = response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429;
-    throw new OAuthError(`the token endpoint answered ${response.status}`, terminal);
+    let reason = "";
+    if (payload !== null && typeof payload === "object") {
+      const error = (payload as Record<string, unknown>).error;
+      if (typeof error === "string") reason = error;
+      else if (error !== null && typeof error === "object") {
+        const shaped = error as Record<string, unknown>;
+        if (typeof shaped.type === "string") reason = shaped.type;
+        else if (typeof shaped.message === "string") reason = shaped.message.slice(0, 120);
+      }
+    }
+    throw new OAuthError(`the token endpoint answered ${response.status}${reason ? ` (${reason})` : ""}`, terminal);
   }
   const parsed = tokenSchema.safeParse(payload);
   if (!parsed.success) throw new OAuthError("the token endpoint sent an unreadable answer", false);
   return parsed.data;
 }
 
-export async function exchange(rail: OAuthRail, code: string, verifier: string): Promise<OAuthBundle> {
+export async function exchange(rail: OAuthRail, code: string, verifier: string, state?: string): Promise<OAuthBundle> {
   const client = CLIENTS[rail];
   const token = await tokenRequest(client, {
     grant_type: "authorization_code",
@@ -246,6 +257,7 @@ export async function exchange(rail: OAuthRail, code: string, verifier: string):
     redirect_uri: client.redirect,
     client_id: client.clientId,
     code_verifier: verifier,
+    ...(rail === "claude-code" && state ? { state } : {}),
   });
   const bundle = toBundle(rail, token);
   if (!bundle.refresh) throw new Error("the grant has no refresh token");

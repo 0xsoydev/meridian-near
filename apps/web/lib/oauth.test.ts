@@ -9,6 +9,7 @@ import {
   readCredential,
   refreshBundle,
   sealCredential,
+  startOAuth,
   type OAuthBundle,
 } from "./oauth.ts";
 
@@ -65,6 +66,45 @@ test("the public account label is masked", () => {
   assert.equal(maskAccount("seller@example.com"), "s***@example.com");
   assert.equal(maskAccount("Acme Org"), "A***");
   assert.equal(maskAccount(null), null);
+});
+
+test("the Claude connect uses the current subscription endpoints", () => {
+  const { url } = startOAuth("claude-code");
+  assert.ok(url.startsWith("https://claude.com/cai/oauth/authorize?"));
+  assert.ok(url.includes("code_challenge_method=S256"));
+  assert.ok(url.includes("user%3Asessions%3Aclaude_code"));
+});
+
+test("the Claude exchange sends state to the platform token endpoint", async () => {
+  const seen: { url: string; body: Record<string, unknown> | null } = { url: "", body: null };
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    seen.url = String(input);
+    seen.body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+    return Response.json({ access_token: "a", refresh_token: "r", expires_in: 3600 });
+  };
+  try {
+    await exchange("claude-code", "code", "verifier", "state-1");
+    assert.equal(seen.url, "https://platform.claude.com/v1/oauth/token");
+    assert.equal(seen.body?.state, "state-1");
+    assert.equal(seen.body?.redirect_uri, "https://platform.claude.com/oauth/code/callback");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a token endpoint refusal carries its reason", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ error: { type: "rate_limit_error" } }, { status: 429 });
+  try {
+    await assert.rejects(
+      exchange("claude-code", "code", "verifier", "state"),
+      (error: unknown) =>
+        error instanceof OAuthError && !error.terminal && error.message.includes("rate_limit_error"),
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test("the exchange keeps the account and plan from the id token", async () => {

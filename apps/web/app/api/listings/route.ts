@@ -13,6 +13,7 @@ import {
   exchange,
   isOAuthRail,
   maskAccount,
+  OAuthError,
   probeOAuth,
   readCode,
   readCredential,
@@ -204,8 +205,12 @@ export async function POST(request: Request): Promise<Response> {
     if (!start || start.rail !== oauthRail || !pasted || pasted.state !== start.state) {
       return fail(400, "invalid_request", "the connection expired; start it again");
     }
-    value = await exchange(oauthRail, pasted.code, start.verifier).catch(() => null);
-    if (!value) return fail(400, "invalid_request", `${rail.id} did not accept the connection`);
+    try {
+      value = await exchange(oauthRail, pasted.code, start.verifier, pasted.state);
+    } catch (error) {
+      const detail = error instanceof OAuthError ? error.message : "the token exchange failed";
+      return fail(400, "invalid_request", `${rail.id} did not accept the connection: ${detail}`);
+    }
     if (value.kind !== "oauth") return fail(400, "invalid_request", `${rail.id} did not return an account`);
   } else {
     if (credential.kind === "oauth") return fail(400, "invalid_request", `${rail.id} takes an API key`);
