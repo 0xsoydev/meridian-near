@@ -79,7 +79,7 @@ export function Proof() {
                           key={fill.tokens.toString()}
                           className="flex h-9 items-center justify-between border-b border-line/70 text-[13px] tabular-nums last:border-b-0"
                           initial={{ opacity: 0, y: -6 }}
-                          animate={{ opacity: step >= 5 && step < seq.last ? 0.45 : 1, y: 0 }}
+                          animate={{ opacity: step >= 5 ? 0.45 : 1, y: 0 }}
                           exit={{ opacity: 0 }}
                           transition={{ duration: 0.4, ease: EASE }}
                         >

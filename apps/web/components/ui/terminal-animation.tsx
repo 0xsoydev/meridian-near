@@ -79,7 +79,7 @@ export function TerminalAnimationRoot({
         setStarted(true);
         observer.disconnect();
       },
-      { rootMargin: "0px 0px 320px 0px" },
+      { threshold: 0.3 },
     );
     observer.observe(element);
     return () => observer.disconnect();
@@ -94,7 +94,7 @@ export function TerminalAnimationRoot({
     clearTimeouts();
     const tab = tabs[activeTab];
     if (!tab) return;
-    if (!started || paused || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (paused || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setCommandTyped(tab.command);
       setIsTypingCommand(false);
       setVisibleLines(tab.lines.length);
@@ -106,6 +106,7 @@ export function TerminalAnimationRoot({
     setCommandTyped(skip ? tab.command : "");
     setIsTypingCommand(!skip);
     setShowCursor(true);
+    if (!started) return;
 
     const later = (run: () => void, ms: number) => {
       timeouts.current.push(setTimeout(run, ms));

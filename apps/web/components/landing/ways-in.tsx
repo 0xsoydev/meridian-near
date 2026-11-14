@@ -11,8 +11,8 @@ const WAYS = [
   {
     id: "agents",
     label: "Run agents",
-    title: "See what each agent spends",
-    body: "Every agent key shows today's spend against its daily limit on the Wallet page. Raise a limit or revoke a key in one step.",
+    title: "Give an agent a key, not your wallet",
+    body: "Ask for a key from the terminal, approve its daily limit on your phone, and point the agent at Meridian. It pays per request in USDC.",
     href: "/agents",
     cta: "Connect an agent",
     route: "/wallet",
@@ -121,7 +121,7 @@ export function WaysIn() {
               <span>Meridian</span>
               <span className="tabular-nums text-ink">{way.route}</span>
             </figcaption>
-            <div className="relative aspect-[390/680] overflow-hidden bg-wash sm:aspect-[35/24]">
+            <div className="relative aspect-[390/680] overflow-hidden sm:aspect-[35/24]">
               <AnimatePresence initial={false}>
                 <motion.picture
                   key={way.id}
@@ -137,8 +137,7 @@ export function WaysIn() {
                     alt={way.alt}
                     width={1400}
                     height={960}
-                    loading="eager"
-                    fetchPriority="low"
+                    loading="lazy"
                     className="size-full object-cover object-left-top"
                   />
                 </motion.picture>

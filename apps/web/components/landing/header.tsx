@@ -40,11 +40,11 @@ export function LandingHeader() {
         </nav>
         <Link
           href={tradeHref}
-          className={`hidden h-10 shrink-0 items-center bg-ink px-4 text-[14px] text-white transition-[background-color,scale] duration-200 ease-brand hover:bg-accent active:scale-[0.96] motion-reduce:transition-none sm:inline-flex ${FOCUS} max-lg:ml-auto`}
+          className={`inline-flex h-10 shrink-0 items-center bg-ink px-4 text-[14px] text-white transition-[background-color,scale] duration-200 ease-brand hover:bg-accent active:scale-[0.96] motion-reduce:transition-none ${FOCUS} max-lg:ml-auto`}
         >
           Enter the market
         </Link>
-        <details ref={menu} className="relative max-sm:ml-auto lg:hidden">
+        <details ref={menu} className="relative lg:hidden">
           <summary aria-label="Menu" className={`${ICON} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
             <Menu aria-hidden className="size-4" />
           </summary>
