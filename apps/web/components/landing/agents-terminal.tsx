@@ -13,6 +13,7 @@ import {
   TerminalAnimationTabTrigger,
   TerminalAnimationTrailingPrompt,
 } from "../ui/terminal-animation";
+import { H2, LEDE, WRAP } from "./shared";
 
 const OK = "text-[#2EBD85]";
 const ROUTE = "text-[#8FA2FF]";
@@ -87,19 +88,19 @@ export function AgentPrompt({ host }: { host: string }) {
   );
 }
 
-export function AgentsTerminal() {
+export function AgentsTerminal({ variant, host = "" }: { variant: "section" | "bare"; host?: string }) {
+  const section = variant === "section";
   const [step, setStep] = useState(0);
   const [paused, setPaused] = useState(false);
   const reduced = useReducedMotion();
 
-  return (
-    <div className="relative h-[340px] overflow-hidden bg-[#56595D]">
+  const terminal = (
+    <div className={`relative overflow-hidden bg-[#56595D] ${section ? "h-[400px] lg:h-[420px]" : "h-[440px]"}`}>
       <img
         src="/images/terminal-rays.webp"
         alt=""
         aria-hidden
-        loading="eager"
-        fetchPriority="low"
+        loading="lazy"
         width={1217}
         height={768}
         className="absolute inset-0 size-full object-cover object-bottom"
@@ -111,13 +112,17 @@ export function AgentsTerminal() {
         onComplete={() => setStep((current) => (current + 1) % STEPS.length)}
         primed
         paused={paused}
-        className="absolute inset-x-4 bottom-0 top-12 flex flex-col rounded-t-[6px] border border-b-0 border-white/10 bg-[#1A1A1A]"
+        className={`absolute bottom-0 flex flex-col rounded-t-[6px] border border-b-0 border-white/10 bg-[#1A1A1A] ${
+          section ? "inset-x-4 top-10 sm:inset-x-8 lg:left-1/2 lg:right-auto lg:top-[56px] lg:w-[min(1000px,86%)] lg:-translate-x-1/2" : "inset-x-4 top-12"
+        }`}
       >
         <div
           tabIndex={0}
           role="region"
           aria-label="Terminal output"
-          className="min-h-0 flex-1 overflow-x-auto whitespace-pre px-4 pb-4 pt-5 font-mono text-[12px] leading-[22px] text-[#F5F5F5] [scrollbar-color:rgba(255,255,255,0.2)_transparent] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#8FA2FF]"
+          className={`min-h-0 flex-1 overflow-x-auto whitespace-pre font-mono focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#8FA2FF] text-[#F5F5F5] [scrollbar-color:rgba(255,255,255,0.2)_transparent] ${
+            section ? "px-4 pb-4 pt-5 text-[12px] leading-[22px] lg:px-10 lg:pb-6 lg:pt-9 lg:text-[15px] lg:leading-[28px]" : "px-4 pb-4 pt-5 text-[12px] leading-[22px]"
+          }`}
         >
           <div className="flex">
             <span className={MUTED}>$ </span>
@@ -131,13 +136,17 @@ export function AgentsTerminal() {
             </span>
           </TerminalAnimationTrailingPrompt>
         </div>
-        <div className="mb-4 flex items-stretch justify-center gap-2">
-          <TerminalAnimationTabList className="flex rounded-[8px] border border-white/10 bg-white/5 p-1 font-mono text-[12px]">
+        <div className={`mb-4 flex items-stretch justify-center gap-2 ${section ? "lg:mb-7" : ""}`}>
+          <TerminalAnimationTabList
+            className={`flex rounded-[8px] border border-white/10 bg-white/5 p-1 font-mono text-[12px] ${section ? "lg:text-[15px]" : ""}`}
+          >
             {STEPS.map((item, index) => (
               <TerminalAnimationTabTrigger
                 key={item.label}
                 index={index}
-                className="rounded-[6px] px-2.5 py-1 text-[#9A9A9A] transition-colors duration-200 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8FA2FF] data-[state=active]:bg-[#EDEDED] data-[state=active]:text-[#1E1E1E]"
+                className={`rounded-[6px] px-2.5 py-1 text-[#9A9A9A] transition-colors duration-200 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8FA2FF] data-[state=active]:bg-[#EDEDED] data-[state=active]:text-[#1E1E1E] ${
+                  section ? "lg:px-4 lg:py-1.5" : ""
+                }`}
               >
                 {item.label}
               </TerminalAnimationTabTrigger>
@@ -156,5 +165,38 @@ export function AgentsTerminal() {
         </div>
       </TerminalAnimationRoot>
     </div>
+  );
+
+  if (!section) return terminal;
+
+  const prompt = `Read ${host}/skill.md and get a Meridian router key.`;
+
+  return (
+    <section aria-labelledby="agents-title" className="border-t border-line py-16 sm:py-24 lg:py-32">
+      <div className={WRAP}>
+        <div className="flex flex-col gap-5">
+          <h2 id="agents-title" className={H2}>
+            Point your agent at Meridian
+          </h2>
+          <p className={LEDE}>
+            Paste this into your coding agent. It reads the manual, asks you for one approval, then buys inference on its own.
+          </p>
+        </div>
+        <div className="mt-10 flex max-w-[760px] flex-col items-start gap-3 border border-line bg-white p-4 sm:flex-row sm:items-center sm:py-2 sm:pr-2">
+          <code className="min-w-0 flex-1 break-words font-mono text-[13px] leading-[20px] text-ink sm:truncate">{prompt}</code>
+          <CopyButton value={prompt} label="Copy prompt" />
+        </div>
+        <ul className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-[14px] text-muted">
+          <li>Works with</li>
+          {AGENTS.map((agent) => (
+            <li key={agent.name} className="flex items-center gap-2 text-ink">
+              <img src={agent.logo} alt="" width={20} height={20} className="size-5 object-contain" />
+              {agent.name}
+            </li>
+          ))}
+        </ul>
+        <div className="mt-12 lg:mt-16">{terminal}</div>
+      </div>
+    </section>
   );
 }

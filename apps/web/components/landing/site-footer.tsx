@@ -1,5 +1,7 @@
+import Image from "next/image";
 import Link from "next/link";
 import { explorer } from "../../lib/client";
+import goddess from "../../public/images/goddess.webp";
 import { FOCUS } from "../kit";
 import { NAV_LINKS } from "../nav-links";
 import { WRAP } from "./shared";
@@ -12,7 +14,8 @@ const GROUPS = [
     title: "Docs",
     links: [
       { label: "Agent manual", href: "/skill.md" },
-      { label: "Source code", href: "https://github.com/0xsoydev/meridian-near" },
+      { label: "Plan", href: "https://github.com/0xsoydev/meridian-near/blob/develop/docs/plan.md" },
+      { label: "README", href: "https://github.com/0xsoydev/meridian-near" },
     ],
   },
   {
@@ -44,10 +47,15 @@ export function SiteFooter() {
           ))}
         </nav>
       </div>
-      <div
-        aria-hidden
-        className="mx-auto mb-[-2%] aspect-[57/13] w-[calc(100%-40px)] max-w-[1200px] bg-line [mask:url(/images/namelogo.svg)_center/contain_no-repeat] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)]"
-      />
+      <div aria-hidden className="mx-auto w-full max-w-[1440px]">
+        <Image
+          src={goddess}
+          alt=""
+          sizes="(min-width: 1024px) 920px, (min-width: 640px) 640px, 100vw"
+          className="pointer-events-none relative z-10 mx-auto -mb-[6%] w-full max-w-[640px] [mask-image:linear-gradient(to_bottom,#000_65%,transparent)] lg:mr-0 lg:h-[min(38vw,460px)] lg:w-auto lg:max-w-none"
+        />
+        <div className="mx-auto mb-[-2%] aspect-[57/13] w-[calc(100%-40px)] max-w-[1200px] bg-line [mask:url(/images/namelogo.svg)_center/contain_no-repeat] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)]" />
+      </div>
     </footer>
   );
 }

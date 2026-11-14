@@ -8,7 +8,6 @@ import { usd } from "../../lib/client";
 import { charge } from "../../lib/price";
 import { LINK } from "../kit";
 import { NumberTicker } from "../ui/number-ticker";
-import { AgentPrompt } from "./agents-terminal";
 import { PlayButton, Stage, Steps, useSequence } from "./blueprint";
 import { H2, LEDE, WRAP } from "./shared";
 
@@ -50,7 +49,7 @@ function frameAt(step: number) {
 const dollars = (micro: bigint | number) => Number(micro) / 1e6;
 const cents = (micro: bigint | number) => `$${dollars(micro).toFixed(2)}`;
 
-export function Limit({ host }: { host: string }) {
+export function Limit() {
   const ref = useRef<HTMLDivElement>(null);
   const seq = useSequence(ref, HOLDS);
   const frame = frameAt(seq.step);
@@ -78,12 +77,9 @@ export function Limit({ host }: { host: string }) {
               </div>
             ))}
           </dl>
-          <div className="mt-4 flex flex-col gap-4">
-            <AgentPrompt host={host} />
-            <Link href="/agents" className={`${LINK} w-fit text-[16px] text-ink`}>
-              Read the agent guide
-            </Link>
-          </div>
+          <Link href="/agents" className={`${LINK} mt-4 w-fit text-[16px] text-ink`}>
+            Set up an agent
+          </Link>
         </div>
 
         <MotionConfig reducedMotion="user">
