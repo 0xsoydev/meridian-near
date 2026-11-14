@@ -225,46 +225,6 @@ export function Select({ className = "", children, ...props }: SelectHTMLAttribu
   );
 }
 
-export function MarketSelect({
-  value,
-  onChange,
-  groups,
-}: {
-  value: string;
-  onChange: (model: string) => void;
-  groups: ReadonlyArray<{ label: string; models: ReadonlyArray<string> }>;
-}) {
-  return (
-    <label className="group relative inline-flex h-12 min-w-0 max-w-full shrink-0 cursor-pointer items-center gap-2 has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-offset-4 has-[select:focus-visible]:outline-accent">
-      <span className="sr-only">Market</span>
-      <span
-        aria-hidden
-        className="truncate font-serif text-[28px] leading-[1.2] text-ink underline decoration-transparent underline-offset-[6px] transition-[text-decoration-color] duration-200 ease-brand group-hover:decoration-ink"
-      >
-        {value || "Choose a market"}
-      </span>
-      <ChevronDown aria-hidden className="size-5 shrink-0 text-ink" />
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="absolute inset-0 cursor-pointer appearance-none opacity-0"
-      >
-        {groups.map((group) =>
-          group.models.length === 0 ? null : (
-            <optgroup key={group.label} label={group.label}>
-              {group.models.map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
-            </optgroup>
-          ),
-        )}
-      </select>
-    </label>
-  );
-}
-
 export function Panel({
   title,
   aside,

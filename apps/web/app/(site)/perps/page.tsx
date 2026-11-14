@@ -11,7 +11,6 @@ import {
   Line,
   NIL,
   Pair,
-  MarketSelect,
   MobileTabs,
   Panel,
   ROW,
@@ -23,6 +22,7 @@ import {
   Table,
   Toggle,
 } from "../../../components/kit";
+import { MarketPicker } from "../../../components/market-picker";
 import { Shortcuts } from "../../../components/shortcuts";
 import { Amount, Portion } from "../../../components/ticket";
 import { ago, amount, api, explorer, fixed, fundingPercent, percent, places, price as fmtPrice, usd } from "../../../lib/client";
@@ -356,7 +356,19 @@ export default function PerpsPage() {
     <div className="flex flex-col pb-[52px] lg:pb-0">
       <h1 className="sr-only">Perps on {model || "the index"}</h1>
       <div className="flex flex-col gap-3 border-b border-line px-4 py-3 lg:h-16 lg:flex-row lg:items-center lg:gap-10 lg:px-6 lg:py-0">
-        <MarketSelect value={model} onChange={(next) => setModel(next)} groups={[{ label: "Perps", models: MARKETS }]} />
+        <MarketPicker
+          value={model}
+          onChange={setModel}
+          groups={[
+            {
+              label: "Perps",
+              models: MARKETS.map((id) => {
+                const mark = marks.get(id);
+                return { id, price: mark ? fmtPrice(BigInt(mark)) : null };
+              }),
+            },
+          ]}
+        />
         <dl className="grid min-w-0 grid-cols-3 gap-x-4 gap-y-2 lg:flex lg:gap-8 lg:overflow-x-auto">
           <Stat label="Index" big>
             {price > 0n ? at(price) : "Not posted"}
