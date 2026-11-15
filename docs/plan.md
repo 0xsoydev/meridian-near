@@ -4,7 +4,7 @@ The spec for the NEAR rebuild. `AGENTS.md` makes it binding: change this file fi
 
 - Development ends 2026-11-14 23:59 UTC. Judging runs 16–18 Nov. The hosted demo stays up until 2026-11-25.
 - Tracks: `defi` and `agents`, plus `privacy` if the NEAR AI proofs ship (§9.12).
-- Baseline: the ETHGlobal Mumbai build on Hedera, 0G and World ID, imported without history at the tag `pre-hackathon`. Only work after that tag is judged (HACKATHON.md Q-002 to Q-004). Its spec is `git show pre-hackathon:docs/plan.md`, cited below as "baseline §n".
+- Baseline: earlier work on other chains, imported without history at the tag `pre-hackathon`. Only work after that tag is judged (HACKATHON.md Q-002 to Q-004). Its spec is `git show pre-hackathon:docs/plan.md`, cited below as "baseline §n".
 - Removed: Hedera (x402, HCS, mirror node, scheduled payouts), 0G (rail, Galileo, Solidity), World ID, Privy, wagmi, viem, and the comfy.fun hookup.
 
 Built: `claude-code` and `codex` (§9.15). Each seller connects their own subscription through a fresh PKCE login; the grant is sealed at rest and refreshed server-side. Reverses the earlier removal; review both vendors' terms before enabling these rails in production.
@@ -286,7 +286,7 @@ Baseline §10.10, unchanged: buys walk the asks, limit buys rest as bids, the ma
 
 - Orders are `core.modify(model, size_delta, margin_delta)` with 1 yocto and 50 Tgas. Margin comes from the Meridian wallet, and the ticket shows the wallet balance, the fee and the resulting liquidation price.
 - `orderPlan`, `positionAfter` and `liquidationPrice` in `lib/perp.ts` are unchanged. A flip is a close, then an open, in one `signAndSendTransactions`.
-- Positions, the margin editor and the stale-index message work as in baseline §10.8. Trade history is not built yet.
+- Positions, the margin editor and the stale-index message work as in baseline §10.8. The History tab lists every open, increase, reduction, flip, close, margin change and liquidation.
 - The keeper pages `liquidatable` every 60 s and calls `liquidate`.
 
 ### 9.9 Fees and the treasury
@@ -475,9 +475,9 @@ Removed: every `HEDERA_*`, `HCS_TOPIC_ID`, `X402_FACILITATOR_URLS`, `MIRROR_NODE
 | N2 | Router | NEP-413 auth; the device flow mints a key after an on-chain `set_cap`; a request on an empty float pulls once and streams; `/me` |
 | N3 | Keeper | rollups logged, index posted, one liquidation, one payout into a seller wallet |
 | N4 | Pages | wallet connect; `/a/[code]`; `/wallet` fund, withdraw, raise, revoke; `/perps` trade; `/sell` list; `/trade` buy; `/receipts` recompute matches |
-| N5 | Any chain | `dry` quotes on every page; one 0.2 USDC fund from Base into `core` on mainnet |
+| N5 | Any chain | `dry` quotes on every page, in any token 1Click supports |
 | N6 | NEAR AI | the house listing streams and its proof verifies on `/receipts` |
-| N7 | Ship | mainnet deploy and seed; demo agent run; README, LICENSE, video; the human posts and submits |
+| N7 | Ship | hosted testnet deploy and seed; demo agent run; README, LICENSE, video; the human posts and submits |
 
 ## 16. Schedule (to Nov 14 23:59 UTC)
 
@@ -487,7 +487,7 @@ Removed: every `HEDERA_*`, `HCS_TOPIC_ID`, `X402_FACILITATOR_URLS`, `MIRROR_NODE
 | Tue 10 | `core` complete with tests; testnet deploy | `pay.ts`, device flow, `/me`, `skill.md` | wallet provider, `/a/[code]`, `/keys` |
 | Wed 11 | keeper on NEAR | NEAR AI rail and proofs, 1Click | `/perps`, `/sell`, `/trade` |
 | Thu 12 | testnet rehearsal end to end | demo agent, seed, e2e scripts | `/receipts`, `/agents`, landing |
-| Fri 13 | mainnet deploy, seed, vault (with the human's OK) | the 0.2 USDC 1Click run, mainnet smoke | polish, empty states |
+| Fri 13 | hosted testnet stack, seed, vault | 1Click quotes, end-to-end smoke | polish, empty states |
 | Sat 14 | README, LICENSE, video; the human posts on X and confirms the submission | | |
 
 The demo path freezes Sat 14 at 12:00 UTC.
@@ -505,7 +505,6 @@ The demo path freezes Sat 14 at 12:00 UTC.
 **Contract**
 - The contract pays storage for wallets, limits, positions and the bounded histories, so a spammer spends gas and Meridian pays storage.
 - A plain `ft_transfer` to `core` is not credited. The UI only sends `ft_transfer_call`.
-- Perp trade history is not built. `/perps` shows open positions and the index.
 
 **Payments and gas**
 - 1Click deposits into `core` depend on `customRecipientMsg`, which is experimental.

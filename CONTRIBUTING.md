@@ -74,5 +74,5 @@ A feature that works in isolation but breaks the demo path is not done. If you c
 
 ## House rules
 
-- The preflight suite lives outside this repo. ETHGlobal disqualifies project code written before kickoff.
+- The preflight suite lives outside this repo.
 - AI tool use is disclosed in the README.

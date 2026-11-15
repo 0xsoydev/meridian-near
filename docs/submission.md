@@ -1,47 +1,15 @@
 # Submission
 
-## Tracks
+Meridian is submitted to the NEAR Hackathon (development closed 2026-11-14 23:59 UTC).
 
-- `defi` — a venue with a spot book, a resale book and cash-settled perps on a token-capacity index, settled in USDC on NEAR.
-- `agents` — an agent buys its own inference from a terminal, with an on-chain daily limit and no NEAR key.
-- `privacy` — only if the NEAR AI proof path ships; the TEE rail and the signed responses are the evidence.
-
-## Links
-
-- Repository: https://github.com/0xsoydev/meridian-near
-- Demo post: the human publishes it and pastes the URL here.
-- Contract: `core.meridian-near.testnet` on NEAR testnet, linked on NearBlocks.
-
-## Demo post
-
-The human writes and publishes this on X, with the video attached:
-
-> Agents need to buy inference, and API credits expire. Meridian is a market for LLM capacity on NEAR: sellers list what they won't use, agents buy it with USDC, and an on-chain daily limit caps what each agent can spend.
->
-> Built at NEAR HACKATHON. @NEARProtocol #NEARHackathon
->
-> Repo: <link>
-
-## Payload
-
-| Field | Value |
+| | |
 |---|---|
-| projectName | Meridian |
-| tracks | `["defi","agents"]` (+ `"privacy"` if the proofs ship) |
-| projectUrl | the repository |
-| demoUrl | the X post |
-| nearAddress | the team's mainnet NEAR account |
-| idea | the problem, the product, and how NEAR fits: `core` wallets and limits, USDC, NEP-413, Intents, NEAR AI |
+| Tracks | `defi`, `privacy`, `swarms`, `security`, `agents`, `realworld`, `open` |
+| Repository | https://github.com/0xsoydev/meridian-near |
+| Submitted code | the tag `hackathon-submission` |
+| Hackathon work | [`pre-hackathon...hackathon-submission`](https://github.com/0xsoydev/meridian-near/compare/pre-hackathon...hackathon-submission) |
+| Live app | https://www.tradeonmeridian.xyz, on NEAR testnet |
+| Contract | [`core.meridian-near.testnet`](https://testnet.nearblocks.io/address/core.meridian-near.testnet) |
+| Agent manual | https://www.tradeonmeridian.xyz/skill.md |
 
-Print the payload, get the human's confirmation, send it once.
-
-## Checklist
-
-- [ ] Repository public, `LICENSE` present
-- [ ] README covers what it is, how NEAR fits, and how to try it
-- [ ] `pnpm typecheck`, `pnpm build`, `pnpm --filter web test`, `cargo test` green
-- [ ] Testnet rehearsal from `docs/runbook.md`
-- [ ] Video 2:30–3:00, human voice
-- [ ] X post published
-- [ ] Tag `hackathon-submission` at the submitted commit
-- [ ] Hosted demo stays up until 2026-11-25
+How each track fits, how to try it in a browser or from a terminal, and why it is built on NEAR are in the [README](../README.md#hackathon-tracks).
